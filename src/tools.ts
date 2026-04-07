@@ -500,7 +500,7 @@ function drawPlotterOverlay(c: CanvasRenderingContext2D): void {
 
   // ── Compass rose (360°, fixed to body) ──
   // Rose rotates independently; roseAngleDeg is relative to the body
-  drawPCPRose(c, 0, 0, PCP_ROSE_R, p.roseAngleDeg);
+  drawPCPRose(c, 0, 0, PCP_ROSE_R, p.roseAngleDeg - p.angleDeg);
 
   // ── Direction arrow (blue) pointing in the +x / forward direction ──
   // Prevents reading the reciprocal bearing by mistake.
