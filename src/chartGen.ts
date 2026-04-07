@@ -544,7 +544,7 @@ function drawLandmark(lm: Landmark, parent: Element): void {
   }
   txt(name, {
     x: x + 12, y: y + 4,
-    'font-size': 10, fill: '#1a1a1a',
+    'font-size': 10, fill: '#1a5276',
     'font-family': 'Georgia, serif', 'font-style': 'italic',
   }, parent);
 }
@@ -584,78 +584,96 @@ function renderCompassRose(rose: CompassRose, svgEl: SVGSVGElement, variation: n
   const { x, y, r } = rose;
   const gG = grp('compass-rose', svgEl);
 
-  el('circle', { cx: x, cy: y, r: r + 6, fill: 'rgba(255,255,255,0.75)', stroke: '#1a3a5c', 'stroke-width': 1 }, gG);
+  // Background circle
+  el('circle', { cx: x, cy: y, r: r + 8, fill: 'rgba(255,255,255,0.95)', stroke: '#c033c0', 'stroke-width': 1 }, gG);
 
-  // True ring ticks
-  for (let deg = 0; deg < 360; deg++) {
+  // ── Outer ring: 36 points at 10° increments (True North) ──
+  for (let i = 0; i < 36; i++) {
+    const deg = i * 10;
     const rad = ((deg - 90) * Math.PI) / 180;
-    const isMajor = deg % 10 === 0;
-    const isMed = deg % 5 === 0;
-    const len = isMajor ? 12 : isMed ? 7 : 4;
+    const isMajor = i % 3 === 0; // every 30°
+    const len = isMajor ? r * 0.16 : r * 0.08;
+    const width = isMajor ? 1.2 : 0.6;
+
+    const outerX = x + (r + 2) * Math.cos(rad);
+    const outerY = y + (r + 2) * Math.sin(rad);
+    const innerX = x + (r + 2 - len) * Math.cos(rad);
+    const innerY = y + (r + 2 - len) * Math.sin(rad);
+
     el('line', {
-      x1: x + (r - 1) * Math.cos(rad),       y1: y + (r - 1) * Math.sin(rad),
-      x2: x + (r - 1 - len) * Math.cos(rad), y2: y + (r - 1 - len) * Math.sin(rad),
-      stroke: '#1a3a5c', 'stroke-width': isMajor ? 1.5 : 0.8,
+      x1: innerX, y1: innerY, x2: outerX, y2: outerY,
+      stroke: '#c033c0', 'stroke-width': width, 'stroke-linecap': 'round',
     }, gG);
   }
 
-  for (let deg = 0; deg < 360; deg += 10) {
-    const rad = ((deg - 90) * Math.PI) / 180;
-    const lr = r - 18;
-    txt(String(deg).padStart(3, '0'), {
-      x: x + lr * Math.cos(rad), y: y + lr * Math.sin(rad),
-      'text-anchor': 'middle', 'dominant-baseline': 'central',
-      'font-size': 8, fill: '#1a3a5c', 'font-family': 'Georgia, serif',
-      transform: `rotate(${deg} ${x + lr * Math.cos(rad)} ${y + lr * Math.sin(rad)})`,
-    }, gG);
-  }
+  // North star above the 0° point on outer ring
+  const starRad = ((-90) * Math.PI) / 180;
+  const starX = x + (r + 18) * Math.cos(starRad);
+  const starY = y + (r + 18) * Math.sin(starRad);
+  drawStar(starX, starY, 4, gG);
 
-  // Magnetic ring
-  const magR = r * 0.72;
-  el('circle', { cx: x, cy: y, r: magR + 4, fill: 'none', stroke: '#884400', 'stroke-width': 1, 'stroke-dasharray': '4,2' }, gG);
-
-  for (let deg = 0; deg < 360; deg += 5) {
-    const magDeg = deg + variation;
-    const rad = ((magDeg - 90) * Math.PI) / 180;
-    const isMajor = deg % 10 === 0;
-    const len = isMajor ? 8 : 4;
-    el('line', {
-      x1: x + (magR + 1) * Math.cos(rad),       y1: y + (magR + 1) * Math.sin(rad),
-      x2: x + (magR + 1 + len) * Math.cos(rad), y2: y + (magR + 1 + len) * Math.sin(rad),
-      stroke: '#884400', 'stroke-width': isMajor ? 1.2 : 0.7,
-    }, gG);
-  }
-
-  for (let deg = 0; deg < 360; deg += 10) {
-    const magDeg = deg + variation;
-    const rad = ((magDeg - 90) * Math.PI) / 180;
-    const lr = magR - 6;
-    txt(String(deg).padStart(3, '0'), {
-      x: x + lr * Math.cos(rad), y: y + lr * Math.sin(rad),
-      'text-anchor': 'middle', 'dominant-baseline': 'central',
-      'font-size': 7, fill: '#884400', 'font-family': 'Georgia, serif',
-      transform: `rotate(${magDeg} ${x + lr * Math.cos(rad)} ${y + lr * Math.sin(rad)})`,
-    }, gG);
-  }
-
-  const cardinals: Array<[number, string]> = [[0, 'N'], [90, 'E'], [180, 'S'], [270, 'W']];
-  for (const [deg, label] of cardinals) {
-    const rad = ((deg - 90) * Math.PI) / 180;
-    const lr = r + 12;
-    txt(label, {
-      x: x + lr * Math.cos(rad), y: y + lr * Math.sin(rad),
-      'text-anchor': 'middle', 'dominant-baseline': 'central',
-      'font-size': 13, fill: '#1a3a5c', 'font-weight': 'bold', 'font-family': 'Georgia, serif',
-    }, gG);
-  }
-
-  el('circle', { cx: x, cy: y, r: 4, fill: '#1a3a5c' }, gG);
-  txt(`Var ${variation}°W`, {
-    x, y: y + magR * 0.35,
-    'text-anchor': 'middle', 'font-size': 9, fill: '#884400', 'font-family': 'Georgia, serif',
+  // Label "T" for True North on outer ring
+  txt('T', {
+    x: x + (r - 8) * Math.cos(starRad),
+    y: y + (r - 8) * Math.sin(starRad),
+    'text-anchor': 'middle', 'dominant-baseline': 'central',
+    'font-size': 10, fill: '#c033c0', 'font-family': 'sans-serif',
   }, gG);
-  txt('T', { x: x + r - 32, y: y - 4, 'font-size': 8, fill: '#1a3a5c', 'font-family': 'Georgia, serif' }, gG);
-  txt('M', { x: x + magR - 18, y: y - 4, 'font-size': 7, fill: '#884400', 'font-family': 'Georgia, serif' }, gG);
+
+  // ── Inner ring: 12 points at 30° increments (Magnetic North) ──
+  const innerRadius = r * 0.58;
+  for (let i = 0; i < 12; i++) {
+    const deg = i * 30;
+    const rad = ((deg - 90) * Math.PI) / 180;
+    const len = r * 0.10;
+
+    const outerX = x + innerRadius * Math.cos(rad);
+    const outerY = y + innerRadius * Math.sin(rad);
+    const innerX = x + (innerRadius - len) * Math.cos(rad);
+    const innerY = y + (innerRadius - len) * Math.sin(rad);
+
+    el('line', {
+      x1: innerX, y1: innerY, x2: outerX, y2: outerY,
+      stroke: '#c033c0', 'stroke-width': 0.8, 'stroke-linecap': 'round',
+    }, gG);
+  }
+
+  // Inner circle outline
+  el('circle', { cx: x, cy: y, r: innerRadius, fill: 'none', stroke: '#c033c0', 'stroke-width': 0.8 }, gG);
+
+  // Magnetic North indicator (small "M" on inner ring at top)
+  const magRad = ((-90) * Math.PI) / 180;
+  txt('M', {
+    x: x + (innerRadius - 14) * Math.cos(magRad),
+    y: y + (innerRadius - 14) * Math.sin(magRad),
+    'text-anchor': 'middle', 'dominant-baseline': 'central',
+    'font-size': 10, fill: '#c033c0', 'font-family': 'sans-serif',
+  }, gG);
+
+  // ── Central hub ──
+  el('circle', { cx: x, cy: y, r: r * 0.04, fill: '#c033c0', stroke: '#c033c0', 'stroke-width': 0.8 }, gG);
+
+  // ── Curved text: Variation ──
+  const textRadius = r * 0.30;
+  const variationText = `Var ${variation.toFixed(1)}°W`;
+  drawCurvedText(x, y, textRadius, variationText, gG, '#c033c0', 9);
+}
+
+/**
+ * drawStar — simple 5-point star at (cx, cy) with size sz
+ */
+function drawStar(cx: number, cy: number, sz: number, parent: Element): void {
+  const pts: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < 10; i++) {
+    const rad = ((i * 36 - 90) * Math.PI) / 180;
+    const radius = i % 2 === 0 ? sz : sz * 0.4;
+    pts.push({
+      x: cx + radius * Math.cos(rad),
+      y: cy + radius * Math.sin(rad),
+    });
+  }
+  const ptStr = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  el('polygon', { points: ptStr, fill: '#c033c0', stroke: '#c033c0', 'stroke-width': 0.5 }, parent);
 }
 
 function renderScaleBar(svgEl: SVGSVGElement): void {
@@ -710,28 +728,78 @@ function renderTitleBlock(svgEl: SVGSVGElement, variation: number, seed: number)
   }
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+/**
+ * drawCurvedText — render text along a circular arc
+ */
+function drawCurvedText(
+  cx: number,
+  cy: number,
+  radius: number,
+  text: string,
+  parent: Element,
+  color: string,
+  fontSize: number,
+): void {
+  const defs = parent.ownerDocument!.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  const pathId = `curve-${Math.random().toString(36).substr(2, 9)}`;
+  const path = parent.ownerDocument!.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+  // Semicircle at the bottom (below center)
+  const startAngle = (-90 - (text.length * 2.5)) * (Math.PI / 180);
+  const endAngle = (-90 + (text.length * 2.5)) * (Math.PI / 180);
+
+  const startX = cx + radius * Math.cos(startAngle);
+  const startY = cy + radius * Math.sin(startAngle);
+  const endX = cx + radius * Math.cos(endAngle);
+  const endY = cy + radius * Math.sin(endAngle);
+
+  const largeArc = text.length > 15 ? 1 : 0;
+  const d = `M ${startX} ${startY} A ${radius} ${radius} 0 ${largeArc} 1 ${endX} ${endY}`;
+
+  path.setAttribute('id', pathId);
+  path.setAttribute('d', d);
+  path.setAttribute('fill', 'none');
+  defs.appendChild(path);
+  parent.appendChild(defs);
+
+  // textPath element
+  const textElement = parent.ownerDocument!.createElementNS('http://www.w3.org/2000/svg', 'text') as SVGTextElement;
+  textElement.setAttribute('font-size', String(fontSize));
+  textElement.setAttribute('fill', color);
+  textElement.setAttribute('font-family', 'sans-serif');
+  textElement.setAttribute('text-anchor', 'middle');
+
+  const textPath = parent.ownerDocument!.createElementNS('http://www.w3.org/2000/svg', 'textPath') as SVGTextPathElement;
+
+
+
+  textPath.setAttribute('href', `#${pathId}`);
+  textPath.setAttribute('startOffset', '50%');
+  textPath.textContent = text;
+
+  textElement.appendChild(textPath);
+  parent.appendChild(textElement);
+}
 
 export function generateChart(seed: number): ChartData {
   const rng = makeRNG(seed);
-  const noise = createNoise2D(seed);
-
+  const noise = createNoise2D(makeRNG(seed + 1));
   const coastPts = buildCoastlinePoints(noise);
-  const depthFn  = buildDepthField(coastPts, noise);
-  const soundings = buildSoundings(depthFn, rng);
-  const contours  = buildContours(depthFn, [5, 10, 20]);
-  const shoals    = buildShoals(depthFn, rng);
-  const landmarks = placeLandmarks(coastPts, depthFn, rng);
-  const harbour   = buildHarbour(coastPts, rng);
-  const cardinalBuoys = buildCardinalBuoys(shoals);
-  const compassRose   = placeCompassRose(depthFn, rng);
-  const anchorages    = buildAnchorages(depthFn, rng);
-  const variation     = 2 + Math.floor(rng() * 4); // 2–5°W
+  const depthFn = buildDepthField(coastPts, noise);
 
   return {
-    seed, variation, coastPts, depthFn,
-    soundings, contours, shoals, landmarks,
-    harbour, cardinalBuoys, compassRose, anchorages,
+    seed,
+    variation: 3 + rng() * 2,
+    coastPts,
+    depthFn,
+    soundings: buildSoundings(depthFn, rng),
+    contours: buildContours(depthFn, [5, 10, 20]),
+    shoals: buildShoals(depthFn, rng),
+    landmarks: placeLandmarks(coastPts, depthFn, rng),
+    harbour: buildHarbour(coastPts, rng),
+    cardinalBuoys: buildCardinalBuoys(buildShoals(depthFn, rng)),
+    compassRose: placeCompassRose(depthFn, rng),
+    anchorages: buildAnchorages(depthFn, rng),
   };
 }
 
