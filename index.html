@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Virtual Chart Navigation Trainer</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body id="app">
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <div id="toolbar-tools">
+      <button class="tool-btn" data-tool="parallel-rules" title="Parallel Rules">&#9639; Rules</button>
+      <button class="tool-btn" data-tool="dividers" title="Dividers">&#9003; Dividers</button>
+      <button class="tool-btn" data-tool="pencil" title="Pencil / Line Plotter">&#9998; Pencil</button>
+      <button class="tool-btn" data-tool="compass" title="Hand Bearing Compass">&#10006; Compass</button>
+      <button class="tool-btn" data-tool="plotter" title="Portland Plotter">&#9676; Plotter</button>
+      <button class="tool-btn" data-tool="std" title="Speed-Time-Distance Calculator">&#9654; S-T-D</button>
+      <button class="tool-btn" id="btn-erase" title="Erase Line">&#9003; Erase</button>
+      <button class="tool-btn" id="btn-clear-all" title="Clear All Lines">&#128465; Clear</button>
+    </div>
+    <div id="toolbar-right">
+      <button id="btn-new-chart">&#8635; New Chart</button>
+      <div id="exercise-picker">
+        <button id="btn-exercise-menu">Exercise &#9660;</button>
+        <div id="exercise-dropdown" class="hidden">
+          <button data-exercise="none">&#9633; Free Plot</button>
+          <button data-exercise="1">1: Dead Reckoning</button>
+          <button data-exercise="2">2: Course to Steer</button>
+          <button data-exercise="3">3: Fix by Cross Bearing</button>
+          <button data-exercise="4">4: Distance &amp; ETA</button>
+          <button data-exercise="5">5: Clearing Bearing</button>
+          <button data-exercise="6">6: Set and Drift</button>
+        </div>
+      </div>
+    </div>
+  </div >
+
+  <!-- Chart area -->
+  <div id="chart-wrap">
+    <svg id="chart-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    <canvas id="draw-canvas"></canvas>
+    <div id="tool-layer"></div>
+    <div id="feedback-overlay" class="hidden">
+      <div id="feedback-box">
+        <h3 id="feedback-title"></h3 >
+        <div id="feedback-body"></div >
+        <button id="feedback-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workbook strip -->
+  <div id="workbook">
+    <div class="wb-field">Variation: <span id="wb-variation">—</span></div>
+    <div class="wb-field">Last bearing: <span id="wb-bearing">—</span></div>
+    <div class="wb-field">Distance: <span id="wb-distance">—</span></div>
+    <div class="wb-field">Acc. Dist: <span id="wb-acc-dist">—</span></div>
+    <div class="wb-field">Course: <span id="wb-course">—</span></div>
+    <div class="wb-field">Speed: <input id="wb-speed" type="number" min="0" max="30" step="0.1" value="6" /> kn</div>
+    <div class="wb-field">Dep. Time: <input id="wb-dep-time" type="time" value="09:00" /></div>
+    <div class="wb-field">ETA: <span id="wb-eta">—</span></div>
+    <div class="wb-field">DR Pos: <span id="wb-dr-pos">—</span></div>
+    <div class="wb-field" id="wb-exercise-field" style="display:none">Exercise: <span id="wb-exercise-name">—</span> <button id="wb-submit">Submit</button></div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
