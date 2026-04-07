@@ -386,6 +386,8 @@ function grp(id: string, parent: Element): SVGGElement {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
+const BORDER_MARGIN = 50; // px outside the chart frame for the graduated border
+
 function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
   svgEl.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
   svgEl.setAttribute('width', String(SVG_W));
@@ -489,7 +491,7 @@ function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
   // Grid, rose, scale bar, title
   renderGrid(svgEl);
   renderCompassRose(compassRose, svgEl, variation, variationDir);
-  renderScaleBar(svgEl);
+  // Scale bar drawn on canvas overlay (see drawScaleBar in canvas.ts)
   renderTitleBlock(svgEl, variation, variationDir, seed);
 }
 
@@ -552,33 +554,50 @@ function drawLandmark(lm: Landmark, parent: Element): void {
 
 function renderGrid(svgEl: SVGSVGElement): void {
   const { minLat, maxLat, minLon, maxLon } = CHART_BOUNDS;
+  const M = BORDER_MARGIN;
   const gG = grp('grid', svgEl);
-  const step = 5 / 60; // 5′ in decimal degrees
+
+  // ── Graticule grid lines (every 5′) ──────────────────────────────────────────
+  const step = 5 / 60;
 
   for (let lat = Math.ceil(minLat / step) * step; lat <= maxLat + 1e-9; lat += step) {
     const { y } = latLonToSVG(lat, minLon);
     el('line', { x1: 0, y1: y, x2: SVG_W, y2: y, stroke: '#6699bb', 'stroke-width': 0.4, opacity: 0.5 }, gG);
-    const deg = Math.floor(lat);
-    const min = Math.round((lat - deg) * 60);
-    txt(`${deg}°${min.toString().padStart(2, '0')}'N`, {
-      x: 4, y: y - 2, 'font-size': 9, fill: '#334455', 'font-family': 'Georgia, serif',
-    }, gG);
   }
-
   for (let lon = Math.ceil(minLon / step) * step; lon <= maxLon + 1e-9; lon += step) {
     const { x } = latLonToSVG(minLat, lon);
     el('line', { x1: x, y1: 0, x2: x, y2: SVG_H, stroke: '#6699bb', 'stroke-width': 0.4, opacity: 0.5 }, gG);
-    const abLon = Math.abs(lon);
-    const deg = Math.floor(abLon);
-    const min = Math.round((abLon - deg) * 60);
-    txt(`${deg.toString().padStart(3, '0')}°${min.toString().padStart(2, '0')}'W`, {
-      x: x + 2, y: SVG_H - 2,
-      'font-size': 9, fill: '#334455', 'font-family': 'Georgia, serif',
-      transform: `rotate(-90 ${x + 2} ${SVG_H - 2})`,
-    }, gG);
   }
 
-  el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H, fill: 'none', stroke: '#1a3a5c', 'stroke-width': 3 }, gG);
+  // ── Chart frame ───────────────────────────────────────────────────────────────
+  el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H, fill: 'none', stroke: '#1a3a5c', 'stroke-width': 2.5 }, gG);
+
+  // ── Helper: degree + decimal-minutes → string ─────────────────────────────────
+  const fmtLat = (lat: number): string => {
+    const d = Math.floor(Math.abs(lat));
+    const m = (Math.abs(lat) - d) * 60;
+    const mWhole = Math.floor(m);
+    const mFrac  = Math.round((m - mWhole) * 10);
+    const hem = lat >= 0 ? 'N' : 'S';
+    return mFrac > 0
+      ? `${d}°${mWhole.toString().padStart(2,'0')}.${mFrac}'${hem}`
+      : `${d}°${mWhole.toString().padStart(2,'0')}'${hem}`;
+  };
+  const fmtLon = (lon: number): string => {
+    const d = Math.floor(Math.abs(lon));
+    const m = (Math.abs(lon) - d) * 60;
+    const mWhole = Math.floor(m);
+    const mFrac  = Math.round((m - mWhole) * 10);
+    const hem = lon >= 0 ? 'E' : 'W';
+    return mFrac > 0
+      ? `${d.toString().padStart(3,'0')}°${mWhole.toString().padStart(2,'0')}.${mFrac}'${hem}`
+      : `${d.toString().padStart(3,'0')}°${mWhole.toString().padStart(2,'0')}'${hem}`;
+  };
+
+  const FONT = 'Georgia, serif';
+  const COL  = '#1a3a5c';
+
+  // Ticks and labels are drawn on the canvas overlay (see drawBorderTicks in canvas.ts)
 }
 
 function renderCompassRose(rose: CompassRose, svgEl: SVGSVGElement, variation: number, variationDir: 'E' | 'W'): void {
@@ -759,8 +778,8 @@ function renderTitleBlock(svgEl: SVGSVGElement, variation: number, variationDir:
   const lines: Array<[string, number, string, string]> = [
     ['FICTIONAL TRAINING CHART', 14, '#1a3a5c', 'bold'],
     [`Chart No. FTC-${(seed % 9999) + 1000}`, 10, '#1a3a5c', 'normal'],
-    ["Scale 1:50,000  Datum WGS84", 9, '#1a3a5c', 'normal'],
-    ["Lat 52°00'N – 52°30'N,  Lon 004°00'W – 004°40'W", 8, '#334455', 'normal'],
+    ["Datum WGS84", 9, '#1a3a5c', 'normal'],
+    ["Lat 52°00'N – 52°30'N,  Lon 004°53'W – 003°47'W", 8, '#334455', 'normal'],
     [`Magnetic Variation: ${variation.toFixed(1)}°${variationDir} (2025)`, 9, '#884400', 'normal'],
     ['FOR TRAINING USE ONLY – NOT FOR NAVIGATION', 8, '#cc2222', 'bold'],
     [`Seed: ${seed}`, 8, '#888', 'normal'],
@@ -828,7 +847,7 @@ function drawCurvedText(
 
 export function generateChart(seed: number): ChartData {
   const rng = makeRNG(seed);
-  const noise = createNoise2D(makeRNG(seed + 1));
+  const noise = createNoise2D(seed + 1);
   const coastPts = buildCoastlinePoints(noise);
   const depthFn = buildDepthField(coastPts, noise);
   

@@ -138,10 +138,13 @@ function applyTransform(): void {
 
 function fitChart(): void {
   const w = chartWrap.clientWidth, h = chartWrap.clientHeight;
-  const s = Math.min(w / SVG_W, h / SVG_H) * 0.95;
+  const BORDER = 52;
+  const sW = (w - BORDER * 2) / SVG_W;
+  const sH = (h - BORDER * 2) / SVG_H;
+  const s = Math.max(sW, sH);
   transform.scale   = s;
-  transform.offsetX = (w - SVG_W * s) / 2;
-  transform.offsetY = (h - SVG_H * s) / 2;
+  transform.offsetX = BORDER;
+  transform.offsetY = BORDER;
   applyTransform();
 }
 
@@ -187,6 +190,7 @@ function redraw(): void {
 
 function resizeAll(): void {
   resizeCanvas(chartWrap.clientWidth, chartWrap.clientHeight);
+  fitChart();
   redraw();
 }
 
