@@ -373,7 +373,9 @@ html, body, #app {
   border: 1px solid #2e86ab;
   border-radius: 6px;
   padding: 12px 16px;
-  max-width: 280px;
+  max-width: 520px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
   font-size: 12px;
   z-index: 120;
   line-height: 1.6;

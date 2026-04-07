@@ -74,7 +74,8 @@ export type DepthFn = (x: number, y: number) => number;
 
 export interface ChartData {
   seed: number;
-  variation: number;     // degrees West, positive
+  variation: number;     // absolute value in degrees
+  variationDir: 'E' | 'W'; // East or West
   coastPts: Array<{ x: number; y: number }>;
   depthFn: DepthFn;
   soundings: Sounding[];
@@ -321,8 +322,8 @@ function placeCompassRose(depthFn: DepthFn, rng: () => number): CompassRose {
     const x = SVG_W * (0.05 + rng() * 0.35);
     const y = SVG_H * (0.1 + rng() * 0.8);
     if (depthFn(x, y) < 20) continue;
-    if (x < 80 || y < 80 || x > SVG_W - 80 || y > SVG_H - 80) continue;
-    return { x, y, r: 90 };
+    if (x < 150 || y < 150 || x > SVG_W - 150 || y > SVG_H - 150) continue;
+    return { x, y, r: 90 }; // r value is overridden in renderCompassRose
   }
   return { x: SVG_W * 0.18, y: SVG_H * 0.25, r: 90 };
 }
@@ -392,7 +393,7 @@ function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
   while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
 
   const { coastPts, soundings, contours, shoals, landmarks, harbour,
-          cardinalBuoys, compassRose, anchorages, variation, seed } = data;
+          cardinalBuoys, compassRose, anchorages, variation, variationDir, seed } = data;
 
   // Clip path
   const defs = el('defs', {}, svgEl);
@@ -487,9 +488,9 @@ function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
 
   // Grid, rose, scale bar, title
   renderGrid(svgEl);
-  renderCompassRose(compassRose, svgEl, variation);
+  renderCompassRose(compassRose, svgEl, variation, variationDir);
   renderScaleBar(svgEl);
-  renderTitleBlock(svgEl, variation, seed);
+  renderTitleBlock(svgEl, variation, variationDir, seed);
 }
 
 function drawChannelBuoy(b: ChannelBuoy, parent: Element): void {
@@ -580,37 +581,62 @@ function renderGrid(svgEl: SVGSVGElement): void {
   el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H, fill: 'none', stroke: '#1a3a5c', 'stroke-width': 3 }, gG);
 }
 
-function renderCompassRose(rose: CompassRose, svgEl: SVGSVGElement, variation: number): void {
-  const { x, y, r } = rose;
+function renderCompassRose(rose: CompassRose, svgEl: SVGSVGElement, variation: number, variationDir: 'E' | 'W'): void {
+  const { x, y } = rose;
+  const r = 160;
   const gG = grp('compass-rose', svgEl);
 
   // Background circle
-  el('circle', { cx: x, cy: y, r: r + 8, fill: 'rgba(255,255,255,0.95)', stroke: '#c033c0', 'stroke-width': 1 }, gG);
+  el('circle', { cx: x, cy: y, r: r + 8, fill: 'rgba(255,255,255,0.2)', stroke: '#c033c0', 'stroke-width': 1 }, gG);
 
-  // ── Outer ring: 36 points at 10° increments (True North) ──
-  for (let i = 0; i < 36; i++) {
-    const deg = i * 10;
+  // ── Outer ring: 360 points at 1° increments with major marks every 10° ──
+  for (let deg = 0; deg < 360; deg++) {
     const rad = ((deg - 90) * Math.PI) / 180;
-    const isMajor = i % 3 === 0; // every 30°
-    const len = isMajor ? r * 0.16 : r * 0.08;
-    const width = isMajor ? 1.2 : 0.6;
+    const isMajor = deg % 10 === 0; // every 10°
+    const positionInGroup = deg % 10; // 0-9 within each 10° group
+    const isMidMinor = isMajor ? false : positionInGroup === 5; // every 5th minor marker
 
-    const outerX = x + (r + 2) * Math.cos(rad);
-    const outerY = y + (r + 2) * Math.sin(rad);
-    const innerX = x + (r + 2 - len) * Math.cos(rad);
-    const innerY = y + (r + 2 - len) * Math.sin(rad);
+    let len, width;
+    if (isMajor) {
+      len = r * 0.16;
+      width = 1.2;
+    } else if (isMidMinor) {
+      len = r * 0.10; // medium minor marker
+      width = 0.7;
+    } else {
+      len = r * 0.06; // small minor marker
+      width = 0.4;
+    }
+
+    const innerX = x + (r + 2) * Math.cos(rad); // Start from outer radius edge
+    const outerX = x + (r + 2 + len) * Math.cos(rad); // Extend outward
+    const innerY = y + (r + 2) * Math.sin(rad);
+    const outerY = y + (r + 2 + len) * Math.sin(rad);
 
     el('line', {
       x1: innerX, y1: innerY, x2: outerX, y2: outerY,
       stroke: '#c033c0', 'stroke-width': width, 'stroke-linecap': 'round',
     }, gG);
+
+    // Label outer ring degrees (every 10°, excluding 0°)
+    if (isMajor && deg !== 0) {
+      const labelRad = ((deg - 90) * Math.PI) / 180;
+      const labelDist = r + 28;
+      const labelX = x + labelDist * Math.cos(labelRad);
+      const labelY = y + labelDist * Math.sin(labelRad);
+      txt(String(deg), {
+        x: labelX, y: labelY,
+        'text-anchor': 'middle', 'dominant-baseline': 'central',
+        'font-size': 8, fill: '#c033c0', 'font-family': 'sans-serif',
+      }, gG);
+    }
   }
 
   // North star above the 0° point on outer ring
   const starRad = ((-90) * Math.PI) / 180;
-  const starX = x + (r + 18) * Math.cos(starRad);
-  const starY = y + (r + 18) * Math.sin(starRad);
-  drawStar(starX, starY, 4, gG);
+  const starX = x + (r + 20) * Math.cos(starRad);
+  const starY = y + (r + 20) * Math.sin(starRad);
+  drawStar(starX, starY, 5, gG);
 
   // Label "T" for True North on outer ring
   txt('T', {
@@ -621,10 +647,13 @@ function renderCompassRose(rose: CompassRose, svgEl: SVGSVGElement, variation: n
   }, gG);
 
   // ── Inner ring: 12 points at 30° increments (Magnetic North) ──
+  // Rotate inner ring by variation amount so magnetic north aligns correctly
+  const variationRad = variationDir === 'E' ? (variation * Math.PI) / 180 : -(variation * Math.PI) / 180;
   const innerRadius = r * 0.58;
+  
   for (let i = 0; i < 12; i++) {
     const deg = i * 30;
-    const rad = ((deg - 90) * Math.PI) / 180;
+    const rad = ((deg - 90) * Math.PI) / 180 + variationRad; // Add variation rotation
     const len = r * 0.10;
 
     const outerX = x + innerRadius * Math.cos(rad);
@@ -636,13 +665,26 @@ function renderCompassRose(rose: CompassRose, svgEl: SVGSVGElement, variation: n
       x1: innerX, y1: innerY, x2: outerX, y2: outerY,
       stroke: '#c033c0', 'stroke-width': 0.8, 'stroke-linecap': 'round',
     }, gG);
+
+    // Label inner ring degrees (every 30°, excluding 0°)
+    if (deg !== 0) {
+      const labelRad = ((deg - 90) * Math.PI) / 180 + variationRad;
+      const labelDist = innerRadius + 12;
+      const labelX = x + labelDist * Math.cos(labelRad);
+      const labelY = y + labelDist * Math.sin(labelRad);
+      txt(String(deg), {
+        x: labelX, y: labelY,
+        'text-anchor': 'middle', 'dominant-baseline': 'central',
+        'font-size': 7, fill: '#c033c0', 'font-family': 'sans-serif',
+      }, gG);
+    }
   }
 
   // Inner circle outline
   el('circle', { cx: x, cy: y, r: innerRadius, fill: 'none', stroke: '#c033c0', 'stroke-width': 0.8 }, gG);
 
-  // Magnetic North indicator (small "M" on inner ring at top)
-  const magRad = ((-90) * Math.PI) / 180;
+  // Magnetic North indicator (small "M" on inner ring at top, rotated by variation)
+  const magRad = ((-90) * Math.PI) / 180 + variationRad;
   txt('M', {
     x: x + (innerRadius - 14) * Math.cos(magRad),
     y: y + (innerRadius - 14) * Math.sin(magRad),
@@ -655,7 +697,7 @@ function renderCompassRose(rose: CompassRose, svgEl: SVGSVGElement, variation: n
 
   // ── Curved text: Variation ──
   const textRadius = r * 0.30;
-  const variationText = `Var ${variation.toFixed(1)}°W`;
+  const variationText = `var ${variation.toFixed(1)}° ${variationDir}`;
   drawCurvedText(x, y, textRadius, variationText, gG, '#c033c0', 9);
 }
 
@@ -678,10 +720,13 @@ function drawStar(cx: number, cy: number, sz: number, parent: Element): void {
 
 function renderScaleBar(svgEl: SVGSVGElement): void {
   const gG = grp('scale-bar', svgEl);
-  // 1 minute of latitude = 1 NM
-  const { y: y0 } = latLonToSVG(52.25, -4.0);
-  const { y: y1 } = latLonToSVG(52.25 + 1 / 60, -4.0);
+  
+  // Calculate 1 NM at chart center latitude (52°15'N)
+  const centerLat = 52.25;
+  const { y: y0 } = latLonToSVG(centerLat, -4.0);
+  const { y: y1 } = latLonToSVG(centerLat + 1 / 60, -4.0); // 1 minute = 1 NM
   const pxPerNM = Math.abs(y1 - y0);
+  
   const bx = SVG_W * 0.04;
   const by = SVG_H - 40;
   const bw = pxPerNM * 5;
@@ -706,7 +751,7 @@ function renderScaleBar(svgEl: SVGSVGElement): void {
   }, gG);
 }
 
-function renderTitleBlock(svgEl: SVGSVGElement, variation: number, seed: number): void {
+function renderTitleBlock(svgEl: SVGSVGElement, variation: number, variationDir: 'E' | 'W', seed: number): void {
   const gG = grp('title-block', svgEl);
   const bx = SVG_W - 320, by = SVG_H - 120;
   el('rect', { x: bx, y: by, width: 310, height: 110, fill: 'rgba(255,255,250,0.85)', stroke: '#1a3a5c', 'stroke-width': 1.5 }, gG);
@@ -714,9 +759,9 @@ function renderTitleBlock(svgEl: SVGSVGElement, variation: number, seed: number)
   const lines: Array<[string, number, string, string]> = [
     ['FICTIONAL TRAINING CHART', 14, '#1a3a5c', 'bold'],
     [`Chart No. FTC-${(seed % 9999) + 1000}`, 10, '#1a3a5c', 'normal'],
-    ["Scale 1:50,000  Datum WGS84", 9, '#334455', 'normal'],
-    ["Lat 52°00'N – 52°30'N  Lon 004°00'W – 004°40'W", 8, '#334455', 'normal'],
-    [`Magnetic Variation: ${variation}°W (2025)`, 9, '#884400', 'normal'],
+    ["Scale 1:50,000  Datum WGS84", 9, '#1a3a5c', 'normal'],
+    ["Lat 52°00'N – 52°30'N,  Lon 004°00'W – 004°40'W", 8, '#334455', 'normal'],
+    [`Magnetic Variation: ${variation.toFixed(1)}°${variationDir} (2025)`, 9, '#884400', 'normal'],
     ['FOR TRAINING USE ONLY – NOT FOR NAVIGATION', 8, '#cc2222', 'bold'],
     [`Seed: ${seed}`, 8, '#888', 'normal'],
   ];
@@ -786,10 +831,14 @@ export function generateChart(seed: number): ChartData {
   const noise = createNoise2D(makeRNG(seed + 1));
   const coastPts = buildCoastlinePoints(noise);
   const depthFn = buildDepthField(coastPts, noise);
+  
+  const variationValue = 3 + rng() * 2;
+  const variationDir = rng() > 0.5 ? 'W' : 'E';
 
   return {
     seed,
-    variation: 3 + rng() * 2,
+    variation: variationValue,
+    variationDir,
     coastPts,
     depthFn,
     soundings: buildSoundings(depthFn, rng),

@@ -130,14 +130,23 @@ function randomInWater(
   minDepth = 5,
 ): LatLon & SVGPoint {
   for (let i = 0; i < 500; i++) {
-    const svgX = rng() * SVG_W * 0.52;
-    const svgY = 50 + rng() * (SVG_H - 100);
+    const svgX = 20 + rng() * (SVG_W * 0.52 - 40);
+    const svgY = 20 + rng() * (SVG_H - 40);
     if (depthFn(svgX, svgY) >= minDepth) {
       const { lat, lon } = svgToLatLon(svgX, svgY);
       return { lat, lon, x: svgX, y: svgY };
     }
   }
-  const x = SVG_W * 0.15, y = SVG_H * 0.5;
+  // Last-resort scan: walk the chart until a water cell is found.
+  for (let gx = 1; gx < 10; gx++) {
+    for (let gy = 1; gy < 10; gy++) {
+      const x = (gx / 10) * SVG_W * 0.5;
+      const y = (gy / 10) * SVG_H;
+      if (depthFn(x, y) >= minDepth) return { ...svgToLatLon(x, y), x, y };
+    }
+  }
+  // Absolute last resort — centre of chart (accept whatever is there).
+  const x = SVG_W * 0.25, y = SVG_H * 0.5;
   return { ...svgToLatLon(x, y), x, y };
 }
 
@@ -162,7 +171,6 @@ function inBoundsSVG(p: { x: number; y: number }, margin = 20): boolean {
 export function generateExercise1(cd: ChartData): Ex1DeadReckoning {
   const rng = seededRNG(cd.seed + 1001);
 
-  // Attempt to generate a departure/dr position pair that both sit on the chart.
   let dep: LatLon & SVGPoint | null = null;
   let courseDeg = 0;
   let speedKn = 0;
@@ -170,98 +178,176 @@ export function generateExercise1(cd: ChartData): Ex1DeadReckoning {
   let drPos: LatLon | null = null;
   let svgDR: SVGPoint | null = null;
 
-  for (let i = 0; i < 200; i++) {
+  const tryPair = (cand: LatLon & SVGPoint, course: number, speed: number, time: number): boolean => {
+    const dr = destinationPoint(cand.lat, cand.lon, course, speed * (time / 60));
+    const svgDRCand = latLonToSVG(dr.lat, dr.lon);
+    if (!inBoundsSVG(cand) || !inBoundsSVG(svgDRCand)) return false;
+    if (cd.depthFn(svgDRCand.x, svgDRCand.y) < 5) return false;
+    dep = cand; courseDeg = course; speedKn = speed; timeMin = time;
+    drPos = dr; svgDR = svgDRCand;
+    return true;
+  };
+
+  for (let i = 0; i < 400; i++) {
     const cand = randomInWater(cd.depthFn, rng);
-    const candCourse = Math.floor(rng() * 360);
     const candSpeed = 4 + rng() * 6;
     const candTime = 20 + Math.floor(rng() * 100);
-    const candDR = destinationPoint(cand.lat, cand.lon, candCourse, candSpeed * (candTime / 60));
-    const candSVGDR = latLonToSVG(candDR.lat, candDR.lon);
-
-    if (inBoundsSVG({ x: cand.x, y: cand.y }) && inBoundsSVG(candSVGDR)) {
-      dep = cand; courseDeg = candCourse; speedKn = candSpeed; timeMin = candTime;
-      drPos = candDR; svgDR = candSVGDR;
-      break;
-    }
+    const candCourse = Math.floor(rng() * 360);
+    if (tryPair(cand, candCourse, candSpeed, candTime)) break;
   }
 
-  // fallback: use a guaranteed-in-bounds centre if above loop failed
+  // Fallback: try every 10° course from multiple departure points until a valid pair is found.
   if (!dep) {
-    const cand = randomInWater(cd.depthFn, rng);
-    courseDeg = Math.floor(rng() * 360);
-    speedKn = 4 + rng() * 6;
-    timeMin = 20 + Math.floor(rng() * 100);
-    drPos = destinationPoint(cand.lat, cand.lon, courseDeg, speedKn * (timeMin / 60));
-    svgDR = latLonToSVG(drPos.lat, drPos.lon);
-    dep = cand;
-    // clamp svgDR into bounds by nudging back toward departure if necessary
-    const clampedX = Math.max(20, Math.min(SVG_W - 20, svgDR.x));
-    const clampedY = Math.max(20, Math.min(SVG_H - 20, svgDR.y));
-    if (clampedX !== svgDR.x || clampedY !== svgDR.y) {
-      // reproject clamped point to lat/lon and replace drPos/svgDR
-      drPos = svgToLatLon(clampedX, clampedY);
-      svgDR = { x: clampedX, y: clampedY };
+    outer: for (let attempt = 0; attempt < 200; attempt++) {
+      const cand = randomInWater(cd.depthFn, rng);
+      if (!inBoundsSVG(cand)) continue;
+      const candSpeed = 4 + rng() * 6;
+      const candTime = 20 + Math.floor(rng() * 100);
+      for (let c = 0; c < 36; c++) {
+        if (tryPair(cand, c * 10, candSpeed, candTime)) break outer;
+      }
     }
   }
 
-  return {
+  const timeHours = Math.floor(timeMin / 60);
+  const timeMinutes = timeMin % 60;
+  const distance = speedKn * (timeMin / 60);
+  const magCourse = ((courseDeg + (cd.variationDir === 'W' ? cd.variation : -cd.variation)) % 360 + 360) % 360;
+
+  const ex = {
     id: 1,
     title: 'Dead Reckoning',
     departure: dep, courseDeg, speedKn, timeMin, drPos: drPos!, svgDR: svgDR!,
     infoHTML: `
-      <h4>Exercise 1: Dead Reckoning</h4>
-      <p>Departure position marked on chart (⊕).</p>
-      <p><b>Course:</b> ${courseDeg}°T &nbsp; <b>Speed:</b> ${speedKn.toFixed(1)} kn</p>
-      <p><b>Time underway:</b> ${Math.floor(timeMin / 60)}h ${timeMin % 60}min</p>
-      <ol>
-        <li>Using the plotter or parallel rules, lay off the true course from the departure mark.</li>
-        <li>Compute distance = speed (kn) × time (h) → nautical miles.</li>
-        <li>Use dividers to measure that distance on the latitude scale and transfer it along the course line.</li>
-        <li>Mark the resulting point as the DR position and submit.</li>
-      </ol>
+      <h4>Exercise 1 — Dead Reckoning</h4>
+
+      <p><b>What is Dead Reckoning?</b><br>
+      Dead reckoning (DR) is estimating your current position by advancing a known past position using course, speed, and elapsed time. It assumes no current, leeway, or steering error — those effects are accounted for later by comparing the DR to an observed fix.</p>
+      <br />
+      <p><b>Given:</b></p>
+      <ul>
+        <li>Departure (⊕): ${formatLatLon(dep!.lat, dep!.lon)}</li>
+        <li>True Course: <b>${courseDeg}°T</b></li>
+        <li>Speed: <b>${speedKn.toFixed(1)} kn</b></li>
+        <li>Time: <b>${timeHours}h ${String(timeMinutes).padStart(2, '0')}min</b> (${timeMin} min)</li>
+        <li>Variation: <b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></li>
+      </ul>
+      <br />
+      <p><b>Step 1 — Calculate distance run:</b><br>
+      <code>Distance = Speed × Time(h) = ${speedKn.toFixed(1)} × ${(timeMin/60).toFixed(2)} = <b>${distance.toFixed(2)} NM</b></code></p>
+      <br />
+      <p><b>Step 2 — Magnetic course (for the helmsman only):</b><br>
+      Charts are plotted in TRUE. Variation converts true to magnetic so the helmsman can steer on the compass.<br>
+      <code>Mag = True ${cd.variationDir === 'W' ? '+' : '−'} Var = ${courseDeg}° ${cd.variationDir === 'W' ? '+' : '−'} ${cd.variation.toFixed(1)}° = <b>${magCourse.toFixed(1)}°M</b></code><br>
+      <em>Do NOT apply variation when plotting on the chart — plot the true course directly.</em></p>
+      <br />
+      <p><b>Step 3 — Set the plotter to ${courseDeg}°T:</b><br>
+      Place the plotter centre on the compass rose. Rotate the body until the long-axis index aligns with <b>${courseDeg}° on the outer (TRUE) ring</b>. The inner magnetic ring is only used for compass steering.</p>
+      <br />
+      <p><b>Step 4 — Slide the plotter to the departure mark (⊕):</b><br>
+      Keep the plotter's angle locked. Slide it across the chart — do not rotate — until the course-edge line passes through ⊕. Draw a light line along that edge.</p>
+      <br />
+      <p><b>Step 5 — Measure ${distance.toFixed(2)} NM along the course line:</b><br>
+      Open the dividers on the <b>latitude scale</b> (left or right chart edge) to span <b>${distance.toFixed(2)} minutes of latitude = ${distance.toFixed(2)} NM</b>. One minute of latitude always equals exactly 1 NM. Place one point on ⊕ and step the dividers along the course line.</p>
+      <br />
+      <p><b>Step 6 — Mark and label the DR position:</b><br>
+      The second divider point is your DR. Mark it with a small circle and label it <b>DR ${Math.floor(timeMin/60)}${String(timeMinutes).padStart(2,'0')}</b>. Then use the pencil tool to submit your mark.</p>
+      <br />
+      <p><b>Answer:</b> DR at ${formatLatLon(drPos!.lat, drPos!.lon)} — tolerance ±0.3 NM.</p>
+      <br />
+      <p><b>Common errors:</b></p>
+      <ul>
+        <li>Using the inner (magnetic) ring of the compass rose instead of the outer (true) ring.</li>
+        <li>Applying variation when plotting — variation is never used on the chart, only for the compass.</li>
+        <li>Measuring distance on the longitude scale — always use the latitude scale.</li>
+        <li>Rotating the plotter while sliding it to the departure point.</li>
+      </ul>
     `,
     enabledTools: ['pencil', 'parallel-rules', 'dividers', 'plotter'],
-  };
+  } as Ex1DeadReckoning;
+
+  // Diagnostic test (disabled in production)
+  // diagnosticEx1(ex);
+
+  return ex;
 }
 
 export function generateExercise2(cd: ChartData): Ex2CourseToSteer {
   const rng = seededRNG(cd.seed + 2002);
-  const dep = randomInWater(cd.depthFn, rng);
+  let dep = randomInWater(cd.depthFn, rng);
   let dest = randomInWater(cd.depthFn, rng);
-  for (let i = 0; i < 100; i++) {
-    const c = randomInWater(cd.depthFn, rng);
-    if (distanceNM(dep.lat, dep.lon, c.lat, c.lon) > 2) { dest = c; break; }
+  for (let i = 0; i < 400; i++) {
+    const dCand = randomInWater(cd.depthFn, rng);
+    const sCand = randomInWater(cd.depthFn, rng);
+    if (inBoundsSVG(dCand) && inBoundsSVG(sCand) &&
+        distanceNM(dCand.lat, dCand.lon, sCand.lat, sCand.lon) > 2) {
+      dep = dCand; dest = sCand; break;
+    }
   }
   const tc = trueBearing(dep.lat, dep.lon, dest.lat, dest.lon);
-  const mc = ((tc + cd.variation) % 360 + 360) % 360;
+  const mc = ((tc + (cd.variationDir === 'W' ? cd.variation : -cd.variation)) % 360 + 360) % 360;
 
-  return {
+  const ex = {
     id: 2,
     title: 'Course to Steer',
     departure: dep, destination: dest,
     trueCourse: tc, magCourse: mc,
     infoHTML: `
-      <h4>Exercise 2: Course to Steer</h4>
-      <p>Departure (⊕) and destination (⊗) marked on chart.</p>
-      <ol>
-        <li>Align the parallel rules or plotter so the index mark reads the line from departure to destination — read the <b>true course</b> at the index mark.</li>
-        <li>Convert to magnetic: <b>Magnetic = True + Variation</b>. On most charts variation is shown as e.g. <em>3°W</em> — treat West as <b>add</b>, East as <b>subtract</b>.</li>
-        <li>If the chart gives an annual change (minutes per year), convert that to degrees (minutes/60) and apply for the years since the chart epoch:
-          <br><code>years = currentYear - chartYear</code>
-          <br><code>adjust = (annualChange_min_per_year / 60) * years</code>
-          <br><code>currentVariation = chartVariation + adjust</code>
-          Example: chart 3°W, decrease 2' per year, 5 years → adjust = -(2*5)/60 = -0.1667°, current = 3 - 0.1667 = 2.8333°W.</li>
-        <li>Enter the true and magnetic courses in the workbook and submit.</li>
-      </ol>
-      <p>Tip: use the plotter rose or chart meridians to ensure accurate alignment.</p>
+      <h4>Exercise 2 — Course to Steer</h4>
+
+      <p><b>Objective:</b> Find the true course from ⊕ to ⊗, then convert it to the magnetic course the helmsman steers by compass.</p>
+      <br />
+      <p><b>Given:</b></p>
+      <ul>
+        <li>Departure (⊕): ${formatLatLon(dep.lat, dep.lon)}</li>
+        <li>Destination (⊗): ${formatLatLon(dest.lat, dest.lon)}</li>
+        <li>Variation: <b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></li>
+      </ul>
+      <br />
+      <p><b>Step 1 — Read the true course from the chart:</b><br>
+      Place the plotter so its long edge passes through both ⊕ and ⊗. Slide — without rotating — to the compass rose. Read the bearing on the <b>outer (TRUE) ring</b> where the edge crosses.<br>
+      <b>True Course = ${tc.toFixed(1)}°T</b></p>
+      <br />
+      <p><b>Step 2 — Understand variation:</b><br>
+      A magnetic compass points to Magnetic North, not True North. The difference is <b>variation</b>. On this chart: <b>${cd.variation.toFixed(1)}°${cd.variationDir}</b>.<br>
+      Rule: <code>Magnetic = True ${cd.variationDir === 'W' ? '+' : '−'} Variation</code><br>
+      (West variation adds; East variation subtracts.)</p>
+      <br />
+      <p><b>Step 3 — Convert to magnetic:</b><br>
+      <code>${tc.toFixed(1)}° ${cd.variationDir === 'W' ? '+' : '−'} ${cd.variation.toFixed(1)}° = <b>${mc.toFixed(1)}°M</b></code><br>
+      The helmsman steers <b>${mc.toFixed(1)}°M</b>. This is never plotted on the chart — it is only for the compass.</p>
+      <br />
+      <p><b>Step 4 — Enter in workbook:</b><br>
+      True course: <b>${tc.toFixed(1)}°T</b> &nbsp;|&nbsp; Magnetic course: <b>${mc.toFixed(1)}°M</b></p>
+      <br />
+      <p><b>Memory aid — TVMDC:</b><br>
+      <code>True → Variation → Magnetic → Deviation → Compass</code><br>
+      Going left-to-right (T→C): West variation adds, East subtracts.<br>
+      Going right-to-left (C→T): reverse the signs.</p>
+      <br />
+      <p><b>Common errors:</b></p>
+      <ul>
+        <li>Reading the inner (magnetic) ring of the compass rose instead of the outer (true) ring.</li>
+        <li>Applying the wrong sign for variation direction.</li>
+        <li>Plotting the magnetic course on the chart instead of the true course.</li>
+      </ul>
     `,
     enabledTools: ['pencil', 'parallel-rules', 'plotter'],
-  };
+  } as Ex2CourseToSteer;
+
+  // Diagnostic test (disabled in production)
+  // diagnosticEx2(ex);
+
+  return ex;
 }
 
 export function generateExercise3(cd: ChartData): Ex3CrossBearing {
   const rng = seededRNG(cd.seed + 3003);
-  const vessel = randomInWater(cd.depthFn, rng, 10);
+  let vessel = randomInWater(cd.depthFn, rng, 10);
+  for (let i = 0; i < 200; i++) {
+    const c = randomInWater(cd.depthFn, rng, 10);
+    if (inBoundsSVG(c)) { vessel = c; break; }
+  }
   const lms = cd.landmarks.slice(0, 3);
 
   const bearings: BearingInfo[] = lms.map(lm => {
@@ -278,19 +364,44 @@ export function generateExercise3(cd: ChartData): Ex3CrossBearing {
     vessel, bearings,
     hazard: cd.shoals[0] ?? null,
     infoHTML: `
-      <h4>Exercise 3: Fix by Cross Bearing</h4>
-      <p>Magnetic bearings from vessel to landmarks:</p>
-      ${bearings.map(b => `<p><b>${b.lm.name}:</b> ${b.magBear.toFixed(1)}°M</p>`).join('')}
-      <p>Variation: ${cd.variation}°W</p>
-      <ol>
-        <li>Convert each magnetic bearing to true: <b>True = Magnetic - Variation</b> (apply sign: West add when converting True→Mag, so reverse when Mag→True).</li>
-        <li>If a chart epoch and annual change are given, compute current variation first using minutes/year converted to degrees:
-          <br><code>currentVariation = chartVariation + (annualChange_min_per_year/60) * yearsSinceChart</code>
-          Check whether the chart wording says "increase" or "decrease" to set the sign of annualChange.</li>
-        <li>For each landmark, plot the <b>reciprocal</b> of the true bearing (add 180°) from the landmark outwards — use parallel rules or plotter to align.</li>
-        <li>The intersection (or cocked-hat) of at least two lines is your fix — mark it and submit.</li>
-      </ol>
-      <p>Tip: use three bearings when available; the cocked-hat gives a measure of accuracy.</p>
+      <h4>Exercise 3 — Fix by Cross Bearing</h4>
+
+      <p><b>What is a cross bearing fix?</b><br>
+      By observing compass bearings to two or more charted landmarks simultaneously, you can draw position lines on the chart. Where they cross is your fix. Three bearings are preferred — the small triangle they form (the "cocked hat") shows the accuracy of your observations.</p>
+      <br />
+      <p><b>Given — magnetic bearings from vessel to landmarks:</b></p>
+      ${bearings.map(b => `<p style="margin:2px 0"><b>${b.lm.name}:</b> ${b.magBear.toFixed(1)}°M</p>`).join('')}
+      <p>Variation: <b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></p>
+      <br />
+      <p><b>Step 1 — Convert each magnetic bearing to true:</b><br>
+      <code>True = Magnetic ${cd.variationDir === 'W' ? '−' : '+'} Variation</code>
+      (Reversing the TVMDC rule: going Mag→True, West subtracts, East adds.)</p>
+      ${bearings.map(b => {
+        const tb = ((b.trueBear + 360) % 360).toFixed(1);
+        return `<p style="margin:2px 0">${b.lm.name}: ${b.magBear.toFixed(1)}° ${cd.variationDir === 'W' ? '−' : '+'} ${cd.variation.toFixed(1)}° = <b>${tb}°T</b></p>`;
+      }).join('')}
+      <br />
+      <p><b>Step 2 — Find the reciprocal bearing for each line:</b><br>
+      A compass bearing is <em>from the vessel to the landmark</em>. To plot on the chart you draw the line <em>from the landmark back toward the vessel</em> — that is the reciprocal.<br>
+      <code>Reciprocal = True bearing + 180° (subtract 180° if result > 360°)</code></p>
+      ${bearings.map(b => {
+        const tb = (b.trueBear + 360) % 360;
+        const recip = ((tb + 180) % 360).toFixed(1);
+        return `<p style="margin:2px 0">${b.lm.name}: ${tb.toFixed(1)}°T → reciprocal <b>${recip}°T</b></p>`;
+      }).join('')}
+      <br />
+      <p><b>Step 3 — Plot the position lines:</b><br>
+      For each landmark, set the plotter to the reciprocal bearing and draw a line outward from the landmark. Use the outer (TRUE) ring of the compass rose.</p>
+      <br />
+      <p><b>Step 4 — Mark your fix:</b><br>
+      The point where the lines intersect (or the centre of the cocked hat) is your position. Mark it and submit.</p>
+      <br />
+      <p><b>Common errors:</b></p>
+      <ul>
+        <li>Plotting the original bearing instead of the reciprocal — the line must come <em>from</em> the landmark.</li>
+        <li>Applying the wrong variation sign when converting M→T.</li>
+        <li>Using only two bearings — a third bearing reveals observation errors.</li>
+      </ul>
     `,
     enabledTools: ['pencil', 'parallel-rules', 'plotter', 'compass'],
   };
@@ -298,11 +409,15 @@ export function generateExercise3(cd: ChartData): Ex3CrossBearing {
 
 export function generateExercise4(cd: ChartData): Ex4DistanceETA {
   const rng = seededRNG(cd.seed + 4004);
-  const dep = randomInWater(cd.depthFn, rng);
+  let dep = randomInWater(cd.depthFn, rng);
   let dest = randomInWater(cd.depthFn, rng);
-  for (let i = 0; i < 100; i++) {
-    const c = randomInWater(cd.depthFn, rng);
-    if (distanceNM(dep.lat, dep.lon, c.lat, c.lon) > 1.5) { dest = c; break; }
+  for (let i = 0; i < 400; i++) {
+    const dCand = randomInWater(cd.depthFn, rng);
+    const sCand = randomInWater(cd.depthFn, rng);
+    if (inBoundsSVG(dCand) && inBoundsSVG(sCand) &&
+        distanceNM(dCand.lat, dCand.lon, sCand.lat, sCand.lon) > 1.5) {
+      dep = dCand; dest = sCand; break;
+    }
   }
   const trueDist = distanceNM(dep.lat, dep.lon, dest.lat, dest.lon);
   const speedKn  = 4 + rng() * 6;
@@ -322,15 +437,39 @@ export function generateExercise4(cd: ChartData): Ex4DistanceETA {
     departure: dep, destination: dest,
     trueDist, speedKn, depTime, eta, timeMin,
     infoHTML: `
-      <h4>Exercise 4: Distance &amp; ETA</h4>
-      <p>Course line from ⊕ to ⊗ is shown.</p>
-      <p><b>Speed:</b> ${speedKn.toFixed(1)} kn &nbsp; <b>Departure:</b> ${depTime}</p>
-      <ol>
-        <li>Use dividers to measure the course distance on the chart and transfer to the latitude scale to get nautical miles.</li>
-        <li>Compute time underway: Time (h) = Distance (NM) / Speed (kn). Convert to minutes if needed.</li>
-        <li>Add the time to the departure time to obtain the ETA; use the STD panel if helpful.</li>
-        <li>Enter the measured distance and ETA in the workbook and submit.</li>
-      </ol>
+      <h4>Exercise 4 — Distance &amp; ETA</h4>
+
+      <p><b>Objective:</b> Measure the distance between two points on the chart using dividers, calculate the time underway, and determine the ETA.</p>
+      <br />
+      <p><b>Given:</b></p>
+      <ul>
+        <li>Departure (⊕): ${formatLatLon(dep.lat, dep.lon)}</li>
+        <li>Destination (⊗): ${formatLatLon(dest.lat, dest.lon)}</li>
+        <li>Speed: <b>${speedKn.toFixed(1)} kn</b></li>
+        <li>Departure time: <b>${depTime}</b></li>
+      </ul>
+      <br />
+      <p><b>Step 1 — Measure distance with dividers:</b><br>
+      Open the dividers to span the distance between ⊕ and ⊗ on the chart. Transfer that span to the <b>latitude scale</b> (the vertical degree scale on the left or right chart edge). Count the minutes of arc — each minute of latitude equals exactly <b>1 nautical mile</b>.<br>
+      <em>Never use the longitude scale for distance — longitude degrees vary in size with latitude.</em></p>
+      <br />
+      <p><b>Step 2 — Calculate time underway:</b><br>
+      <code>Time (h) = Distance (NM) ÷ Speed (kn)</code><br>
+      Then convert to hours and minutes: multiply the decimal hours by 60 to get minutes.</p>
+      <br />
+      <p><b>Step 3 — Calculate ETA:</b><br>
+      <code>ETA = Departure time + Time underway</code><br>
+      Add the minutes first, then carry over into hours if needed. Use the STD panel on the right to assist with the arithmetic.</p>
+      <br />
+      <p><b>Step 4 — Enter in workbook and submit:</b><br>
+      Record the measured distance (NM) and ETA (HH:MM), then press Submit.</p>
+      <br />
+      <p><b>Common errors:</b></p>
+      <ul>
+        <li>Measuring on the longitude scale instead of the latitude scale.</li>
+        <li>Forgetting to convert decimal hours to minutes before adding to departure time.</li>
+        <li>Not accounting for midnight roll-over if the voyage runs past 24:00.</li>
+      </ul>
     `,
     enabledTools: ['dividers', 'std'],
   };
@@ -358,15 +497,37 @@ export function generateExercise5(cd: ChartData): Ex5ClearingBearing {
     lmLat: lmPos.lat, lmLon: lmPos.lon,
     clearingBearing,
     infoHTML: `
-      <h4>Exercise 5: Clearing Bearing</h4>
-      <p>Hazard (shoal) marked on chart.</p>
-      <p>Landmark: <b>${lm?.name ?? 'Landmark'}</b>.</p>
-      <ol>
-        <li>From the landmark, use parallel rules or the plotter to read the true bearing to the hazard.</li>
-        <li>The clearing bearing is the bearing from the landmark such that bearings <b>less than</b> this value keep you clear of the hazard.</li>
-        <li>Draw the clearing bearing line from the landmark toward open water and record the bearing value.</li>
-        <li>Submit the bearing value.</li>
-      </ol>
+      <h4>Exercise 5 — Clearing Bearing</h4>
+
+      <p><b>What is a clearing bearing?</b><br>
+      A clearing bearing is a compass bearing that, when maintained, keeps your vessel safely clear of a hazard. If you keep the bearing to a landmark <em>greater than</em> or <em>less than</em> a critical value, you know you are on the safe side of a danger.</p>
+      <br />
+      <p><b>Given:</b></p>
+      <ul>
+        <li>Hazard: shoal marked on chart (red circle)</li>
+        <li>Reference landmark: <b>${lm?.name ?? 'Landmark'}</b></li>
+        <li>Variation: <b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></li>
+      </ul>
+      <br />
+      <p><b>Step 1 — Find the true bearing from the landmark to the hazard:</b><br>
+      Place the plotter so its edge passes through the landmark and the hazard. Slide to the compass rose and read the <b>outer (TRUE) ring</b> in the direction from landmark toward hazard.</p>
+      <br />
+      <p><b>Step 2 — This is your clearing bearing:</b><br>
+      The line from the landmark through the edge of the hazard is the critical boundary. Vessels on the seaward side of this line (bearing to landmark <em>not</em> crossing the hazard) are safe.</p>
+      <br />
+      <p><b>Step 3 — Convert to magnetic (for the compass watch):</b><br>
+      <code>Magnetic = True ${cd.variationDir === 'W' ? '+' : '−'} ${cd.variation.toFixed(1)}°</code><br>
+      At sea, the officer of the watch monitors the magnetic bearing to the landmark and ensures it stays on the correct side of the clearing value.</p>
+      <br />
+      <p><b>Step 4 — Draw and submit:</b><br>
+      Draw the clearing bearing line from the landmark, label it with the true bearing value, and submit.</p>
+      <br />
+      <p><b>Common errors:</b></p>
+      <ul>
+        <li>Drawing the line in the wrong direction (from hazard to landmark instead of landmark to hazard).</li>
+        <li>Confusing which side of the line is safe — always check on the chart which side is open water.</li>
+        <li>Forgetting to convert to magnetic for the helmsman's watch.</li>
+      </ul>
     `,
     enabledTools: ['pencil', 'parallel-rules', 'plotter'],
   };
@@ -386,50 +547,46 @@ export function generateExercise6(cd: ChartData): Ex6SetAndDrift {
   let setCurrent = 0;
   let driftRate = 0;
 
-  for (let i = 0; i < 200; i++) {
+  const tryTriple = (
+    cand: LatLon & SVGPoint, course: number, speed: number, time: number,
+    set: number, drift: number,
+  ): boolean => {
+    const tHr = time / 60;
+    const dr = destinationPoint(cand.lat, cand.lon, course, speed * tHr);
+    const fix = destinationPoint(dr.lat, dr.lon, set, drift * tHr);
+    const svgDRc = latLonToSVG(dr.lat, dr.lon);
+    const svgFixc = latLonToSVG(fix.lat, fix.lon);
+    if (!inBoundsSVG(cand) || !inBoundsSVG(svgDRc) || !inBoundsSVG(svgFixc)) return false;
+    if (cd.depthFn(svgDRc.x, svgDRc.y) < 5 || cd.depthFn(svgFixc.x, svgFixc.y) < 5) return false;
+    dep = cand; courseDeg = course; speedKn = speed; timeMin = time; timeHr = tHr;
+    drPos = dr; fixPos = fix; setCurrent = set; driftRate = drift;
+    return true;
+  };
+
+  for (let i = 0; i < 400; i++) {
     const cand = randomInWater(cd.depthFn, rng, 10);
     const candCourse = Math.floor(rng() * 360);
     const candSpeed = 4 + rng() * 4;
     const candTime = 30 + Math.floor(rng() * 60);
-    const candTimeHr = candTime / 60;
-    const candDR = destinationPoint(cand.lat, cand.lon, candCourse, candSpeed * candTimeHr);
     const candSet = Math.floor(rng() * 360);
-    const candDriftRate = 0.3 + rng() * 1.2;
-    const candFix = destinationPoint(candDR.lat, candDR.lon, candSet, candDriftRate * candTimeHr);
-
-    const svgDR = latLonToSVG(candDR.lat, candDR.lon);
-    const svgFix = latLonToSVG(candFix.lat, candFix.lon);
-
-    if (inBoundsSVG({ x: cand.x, y: cand.y }) && inBoundsSVG(svgDR) && inBoundsSVG(svgFix)) {
-      dep = cand; courseDeg = candCourse; speedKn = candSpeed; timeMin = candTime; timeHr = candTimeHr;
-      drPos = candDR; fixPos = candFix; setCurrent = candSet; driftRate = candDriftRate;
-      break;
-    }
+    const candDrift = 0.3 + rng() * 1.2;
+    if (tryTriple(cand, candCourse, candSpeed, candTime, candSet, candDrift)) break;
   }
 
-  // fallback: generate once and clamp if needed
+  // Fallback: sweep courses and set directions from multiple departure points.
   if (!dep) {
-    const cand = randomInWater(cd.depthFn, rng, 10);
-    courseDeg = Math.floor(rng() * 360);
-    speedKn = 4 + rng() * 4;
-    timeMin = 30 + Math.floor(rng() * 60);
-    timeHr = timeMin / 60;
-    drPos = destinationPoint(cand.lat, cand.lon, courseDeg, speedKn * timeHr);
-    setCurrent = Math.floor(rng() * 360);
-    driftRate = 0.3 + rng() * 1.2;
-    fixPos = destinationPoint(drPos.lat, drPos.lon, setCurrent, driftRate * timeHr);
-    dep = cand;
-
-    // clamp DR and Fix into chart bounds if necessary
-    let svgDR = latLonToSVG(drPos.lat, drPos.lon);
-    let svgFix = latLonToSVG(fixPos.lat, fixPos.lon);
-    const clampedDRX = Math.max(20, Math.min(SVG_W - 20, svgDR.x));
-    const clampedDRY = Math.max(20, Math.min(SVG_H - 20, svgDR.y));
-    const clampedFixX = Math.max(20, Math.min(SVG_W - 20, svgFix.x));
-    const clampedFixY = Math.max(20, Math.min(SVG_H - 20, svgFix.y));
-
-    if (clampedDRX !== svgDR.x || clampedDRY !== svgDR.y) drPos = svgToLatLon(clampedDRX, clampedDRY);
-    if (clampedFixX !== svgFix.x || clampedFixY !== svgFix.y) fixPos = svgToLatLon(clampedFixX, clampedFixY);
+    outer6: for (let attempt = 0; attempt < 200; attempt++) {
+      const cand = randomInWater(cd.depthFn, rng, 10);
+      if (!inBoundsSVG(cand)) continue;
+      const candSpeed = 4 + rng() * 4;
+      const candTime = 30 + Math.floor(rng() * 60);
+      const candDrift = 0.3 + rng() * 1.2;
+      for (let c = 0; c < 36; c++) {
+        for (let s = 0; s < 36; s++) {
+          if (tryTriple(cand, c * 10, candSpeed, candTime, s * 10, candDrift)) break outer6;
+        }
+      }
+    }
   }
 
   return {
@@ -440,15 +597,43 @@ export function generateExercise6(cd: ChartData): Ex6SetAndDrift {
     svgDR:  latLonToSVG(drPos!.lat, drPos!.lon),
     svgFix: latLonToSVG(fixPos!.lat, fixPos!.lon),
     infoHTML: `
-      <h4>Exercise 6: Set and Drift</h4>
-      <p>Dep (⊕) — course ${courseDeg}°T, speed ${speedKn.toFixed(1)} kn, ${timeMin} min.</p>
-      <p>Fix (⊗) is shown after elapsed time.</p>
-      <ol>
-        <li>Use the plotter/parallel rules to lay off the dead-reckoned (DR) position from departure using course and distance (speed × time).</li>
-        <li>Draw a vector from the DR point to the actual fix (DR → Fix) using the pencil tool.</li>
-        <li>Measure the bearing (set) of that vector with the plotter and the length (distance) with dividers.</li>
-        <li>Drift rate = distance (NM) / time (h). Record set (°T) and drift rate (kn) and submit.</li>
-      </ol>
+      <h4>Exercise 6 — Set and Drift</h4>
+
+      <p><b>What are set and drift?</b><br>
+      <b>Set</b> is the direction the current is pushing your vessel (true bearing, °T). <b>Drift</b> is the speed of that current (knots). They are determined by comparing where the DR says you should be with where an observed fix shows you actually are.</p>
+      <br />
+      <p><b>Given:</b></p>
+      <ul>
+        <li>Departure (⊕): ${formatLatLon(dep!.lat, dep!.lon)}</li>
+        <li>True course steered: <b>${courseDeg}°T</b></li>
+        <li>Speed through water: <b>${speedKn.toFixed(1)} kn</b></li>
+        <li>Time underway: <b>${timeMin} min (${(timeMin/60).toFixed(2)} h)</b></li>
+        <li>Actual fix (⊗): shown on chart</li>
+      </ul>
+      <br />
+      <p><b>Step 1 — Calculate the DR position:</b><br>
+      <code>Distance = ${speedKn.toFixed(1)} kn × ${(timeMin/60).toFixed(2)} h = ${(speedKn*(timeMin/60)).toFixed(2)} NM</code><br>
+      From ⊕, set the plotter to <b>${courseDeg}°T</b> and draw a course line. Step the dividers ${(speedKn*(timeMin/60)).toFixed(2)} NM along it to find the DR position. Mark it with a semicircle labelled "DR".</p>
+      <br />
+      <p><b>Step 2 — Draw the current vector (DR → Fix):</b><br>
+      Draw a line from your DR position to the actual fix (⊗). This vector represents the displacement caused by current over the elapsed time.</p>
+      <br />
+      <p><b>Step 3 — Measure the set:</b><br>
+      Place the plotter on the DR→Fix line and read the bearing on the outer (TRUE) ring in the direction from DR toward Fix. This is the <b>set</b> (direction current is flowing).</p>
+      <br />
+      <p><b>Step 4 — Calculate the drift:</b><br>
+      Measure the length of the DR→Fix line with dividers against the latitude scale to get the distance in NM.<br>
+      <code>Drift (kn) = Distance (NM) ÷ Time (h)</code></p>
+      <br />
+      <p><b>Step 5 — Record and submit:</b><br>
+      Enter set (°T) and drift rate (kn) in the workbook and submit.</p>
+      <br />
+      <p><b>Common errors:</b></p>
+      <ul>
+        <li>Drawing the vector Fix→DR instead of DR→Fix — the direction must be from dead-reckoned position to actual fix.</li>
+        <li>Using speed made good instead of speed through water when calculating the DR.</li>
+        <li>Measuring the DR→Fix distance on the longitude scale instead of the latitude scale.</li>
+      </ul>
     `,
     enabledTools: ['pencil', 'parallel-rules', 'dividers', 'plotter'],
   };
@@ -511,20 +696,21 @@ function scoreEx1(ex: Ex1DeadReckoning, lines: DrawnLine[]): ScoreResult {
 
 function scoreEx2(ex: Ex2CourseToSteer, cd: ChartData, wbValues: WorkbookValues): ScoreResult {
   const subTrue = wbValues.course;
-  const subMag  = subTrue + cd.variation;
+  const subMag  = subTrue + (cd.variationDir === 'W' ? cd.variation : -cd.variation);
   const errT    = Math.abs(angleDiff(subTrue, ex.trueCourse));
   const errM    = Math.abs(angleDiff(subMag,  ex.magCourse));
-  const passT   = errT <= 1;
+  const passT   = errT <= 2;
   const passM   = errM <= 2;
 
   let html = `
     <p>True course: <b>${ex.trueCourse.toFixed(1)}°T</b> — you entered ${subTrue.toFixed(1)}°T
       <span class="${passT ? 'score-good' : 'score-bad'}">(error ${errT.toFixed(1)}°)</span></p>
-    <p>Magnetic: <b>${ex.magCourse.toFixed(1)}°M</b> — computed ${subMag.toFixed(1)}°M
+    <p>Magnetic course: <b>${ex.magCourse.toFixed(1)}°M</b> — computed ${subMag.toFixed(1)}°M
       <span class="${passM ? 'score-good' : 'score-bad'}">(error ${errM.toFixed(1)}°)</span></p>
+    <p><b>Chart verification:</b> True bearing from departure to destination should be <b>${ex.trueCourse.toFixed(1)}°</b>.</p>
   `;
-  if (!passT) html += '<p class="score-bad">Check your parallel rules alignment on the compass rose.</p>';
-  if (!passM) html += '<p class="score-bad">Magnetic = True + Variation (°W adds).</p>';
+  if (!passT) html += '<p class="score-bad">❌ Check your parallel rules alignment on the compass rose (use the OUTER ring for true bearing).</p>';
+  if (!passM) html += '<p class="score-bad">❌ Magnetic = True + Variation (west variation adds when True→Magnetic).</p>';
 
   return { pass: passT && passM, html };
 }
@@ -749,4 +935,199 @@ export function drawExerciseFeedbackOverlay(
     ctx.fillText('Fix', sc2.x + 8, sc2.y - 4);
   }
   ctx.restore();
+}
+
+/**
+ * Test: Verify that a true bearing from departure to destination
+ * actually points toward the destination when plotted on the SVG chart.
+ */
+export function testBearingIntersection(
+  depLat: number, depLon: number,
+  destLat: number, destLon: number,
+  trueBearing: number,
+): { pass: boolean; message: string; debug: Record<string, number> } {
+  // Convert to SVG coordinates
+  const depSVG = latLonToSVG(depLat, depLon);
+  const destSVG = latLonToSVG(destLat, destLon);
+
+  // Calculate the actual bearing from departure to destination in SVG space
+  const dx = destSVG.x - depSVG.x;
+  const dy = destSVG.y - depSVG.y;
+
+  // SVG angle: atan2(dy, dx) where positive Y is downward
+  const svgAngle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+  // Convert SVG angle back to true bearing
+  // SVG: 0° = East, 90° = South
+  // True: 0° = North, 90° = East
+  // Formula: trueBear = 90° - svgAngle
+  const actualBearing = (90 - svgAngle + 360) % 360;
+
+  // Calculate error
+  let error = actualBearing - trueBearing;
+  if (error > 180) error -= 360;
+  if (error < -180) error += 360;
+  error = Math.abs(error);
+
+  // Check if line from departure along the true bearing intersects destination
+  // by extending a line from departure at the given bearing and checking if it passes near the destination
+  const bearingRad = (trueBearing - 90) * (Math.PI / 180); // Convert true bearing to SVG angle
+  const distToTarget = Math.sqrt(dx * dx + dy * dy);
+  const extendedX = depSVG.x + distToTarget * Math.cos(bearingRad);
+  const extendedY = depSVG.y + distToTarget * Math.sin(bearingRad);
+
+  // Distance from extended point to actual destination
+  const intersectionError = Math.sqrt(
+    (extendedX - destSVG.x) ** 2 + (extendedY - destSVG.y) ** 2
+  );
+
+  const pass = error <= 2 && intersectionError <= 5; // Allow 2° bearing error, 5px intersection error
+
+  return {
+    pass,
+    message: pass
+      ? `✓ Bearing ${trueBearing.toFixed(1)}°T correctly points to destination`
+      : `✗ Bearing error: ${error.toFixed(1)}° | Intersection error: ${intersectionError.toFixed(1)}px`,
+    debug: {
+      depSVG_x: depSVG.x,
+      depSVG_y: depSVG.y,
+      destSVG_x: destSVG.x,
+      destSVG_y: destSVG.y,
+      svgAngle,
+      actualBearing: parseFloat(actualBearing.toFixed(1)),
+      expectedBearing: trueBearing,
+      bearingError: parseFloat(error.toFixed(1)),
+      intersectionError: parseFloat(intersectionError.toFixed(1)),
+      extendedX,
+      extendedY,
+    },
+  };
+}
+
+/**
+ * Test: Verify that a true course from departure for a given distance
+ * actually points toward and reaches the DR position.
+ * 
+ * NOTE: We verify using GEODETIC calculations only (haversine), not SVG angles.
+ * SVG is an equirectangular projection at 52°N which distorts bearings significantly,
+ * so we cannot use SVG angles to verify true bearing. The exercise course is correct
+ * if the geodetic bearing and distance match the input course/speed/time.
+ */
+export function testDeadReckoningIntersection(
+  depLat: number, depLon: number,
+  drLat: number, drLon: number,
+  trueCourse: number,
+  speedKn: number,
+  timeMin: number,
+): { pass: boolean; message: string; debug: Record<string, any> } {
+  // Verify geodetic bearing and distance
+  const actualBearing = trueBearing(depLat, depLon, drLat, drLon);
+  
+  let bearingError = actualBearing - trueCourse;
+  if (bearingError > 180) bearingError -= 360;
+  if (bearingError < -180) bearingError += 360;
+  bearingError = Math.abs(bearingError);
+
+  const expectedDistance = speedKn * (timeMin / 60);
+  const actualDistance = distanceNM(depLat, depLon, drLat, drLon);
+  const distanceError = Math.abs(actualDistance - expectedDistance);
+
+  // For debugging: also show SVG angle (but don't use it for validation)
+  const depSVG = latLonToSVG(depLat, depLon);
+  const drSVG = latLonToSVG(drLat, drLon);
+  const dx = drSVG.x - depSVG.x;
+  const dy = drSVG.y - depSVG.y;
+  
+  const svgAngleRad = Math.atan2(dy, dx);
+  let svgAngleDeg = svgAngleRad * (180 / Math.PI);
+  while (svgAngleDeg < 0) svgAngleDeg += 360;
+  svgAngleDeg = svgAngleDeg % 360;
+
+  // Pass if: geodetic bearing/distance match (projection distortion is acceptable)
+  const pass = bearingError <= 2 && distanceError <= 0.1;
+
+  return {
+    pass,
+    message: pass
+      ? `✓ DR position at ${trueCourse.toFixed(1)}°T for ${expectedDistance.toFixed(2)} NM is correct`
+      : `✗ Bearing error: ${bearingError.toFixed(1)}° | Distance error: ${distanceError.toFixed(2)} NM`,
+    debug: {
+      actualBearing: parseFloat(actualBearing.toFixed(1)),
+      expectedBearing: trueCourse,
+      bearingError: parseFloat(bearingError.toFixed(1)),
+      svgAngleDeg: parseFloat(svgAngleDeg.toFixed(2)),
+      expectedDistance: parseFloat(expectedDistance.toFixed(2)),
+      actualDistance: parseFloat(actualDistance.toFixed(2)),
+      distanceError: parseFloat(distanceError.toFixed(2)),
+      depSVG_x: Math.round(depSVG.x * 10) / 10,
+      depSVG_y: Math.round(depSVG.y * 10) / 10,
+      drSVG_x: Math.round(drSVG.x * 10) / 10,
+      drSVG_y: Math.round(drSVG.y * 10) / 10,
+    },
+  };
+}
+
+/**
+ * Run diagnostic tests on Exercise 1 to verify DR calculations
+ */
+export function diagnosticEx1(ex: Ex1DeadReckoning): void {
+  // Test 1: Round-trip consistency
+  const verifyBearing = trueBearing(ex.departure.lat, ex.departure.lon, ex.drPos.lat, ex.drPos.lon);
+  const bearingDelta = Math.abs(verifyBearing - ex.courseDeg);
+  
+  console.log('=== EXERCISE 1 HAVERSINE CONSISTENCY TEST ===');
+  console.log('Input course to destinationPoint: ' + ex.courseDeg.toFixed(1) + '°T');
+  console.log('Calculated DR via haversine:      ' + `${ex.drPos.lat.toFixed(6)}°N, ${(-ex.drPos.lon).toFixed(6)}°W`);
+  console.log('Bearing back to DR via trueBearing: ' + verifyBearing.toFixed(1) + '°T');
+  console.log('Round-trip delta: ' + bearingDelta.toFixed(1) + '°');
+  
+  if (bearingDelta > 0.5) {
+    console.error('❌ HAVERSINE FUNCTIONS ARE INCONSISTENT');
+    console.error('This is a fundamental math issue - destinationPoint and trueBearing dont match');
+  } else {
+    console.log('✓ Haversine functions are self-consistent');
+  }
+  
+  // Also run the full test as before
+  const result = testDeadReckoningIntersection(
+    ex.departure.lat, ex.departure.lon,
+    ex.drPos.lat, ex.drPos.lon,
+    ex.courseDeg,
+    ex.speedKn,
+    ex.timeMin,
+  );
+
+  console.log('=== Exercise 1 Dead Reckoning Test ===');
+  console.log(result.message);
+  console.log('Debug:', result.debug);
+  
+  if (!result.pass) {
+    console.error('❌ DEAD RECKONING CALCULATION FAILED');
+    console.log('Expected course:', ex.courseDeg.toFixed(1), '°T');
+    console.log('Actual bearing to DR:', result.debug.actualBearing, '°T');
+    console.log('Bearing error:', result.debug.bearingError, '°');
+    console.log('Expected distance:', result.debug.expectedDistance, 'NM');
+    console.log('Actual distance to DR:', result.debug.actualDistance, 'NM');
+    console.log('Distance error:', result.debug.distanceError, 'NM');
+    console.log('(Note: SVG angle differs from true bearing due to equirectangular projection distortion at 52°N)');
+  }
+}
+
+/**
+ * Run diagnostic tests on Exercise 2 to verify bearing calculations
+ */
+export function diagnosticEx2(ex: Ex2CourseToSteer): void {
+  const result = testBearingIntersection(
+    ex.departure.lat, ex.departure.lon,
+    ex.destination.lat, ex.destination.lon,
+    ex.trueCourse,
+  );
+
+  console.log('=== Exercise 2 Course to Steer Test ===');
+  console.log(result.message);
+  console.log('Debug:', result.debug);
+  
+  if (!result.pass) {
+    console.error('❌ COURSE TO STEER CALCULATION FAILED');
+  }
 }

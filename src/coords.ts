@@ -17,11 +17,16 @@ export interface ChartBounds {
   readonly maxLon: number;
 }
 
+// Longitude span is derived so that px/NM east == px/NM north, making SVG
+// angles equal to true geodetic bearings (equidistant cylindrical projection).
+//   lon_span = (SVG_W / SVG_H) × lat_span / cos(midLat)
+//            = (2400/1800) × 0.5° / cos(52.25°) ≈ 1.088°
+// centred on the original 004°20′W meridian.
 export const CHART_BOUNDS: ChartBounds = {
   minLat: 52.0,
   maxLat: 52.5,
-  minLon: -4.6667,  // 004°40′W
-  maxLon: -4.0,     // 004°00′W
+  minLon: -4.877,  // 004°53′W  (was 004°40′W)
+  maxLon: -3.789,  // 003°47′W  (was 004°00′W)
 };
 
 export interface SVGPoint { x: number; y: number; }
@@ -139,4 +144,45 @@ export function formatLatLon(lat: number, lon: number): string {
   const latH = lat >= 0 ? 'N' : 'S';
   const lonH = lon >= 0 ? 'E' : 'W';
   return `${latD}°${latM}'${latH} ${lonD.toString().padStart(3, '0')}°${lonM}'${lonH}`;
+}
+
+/**
+ * Convert a true bearing (0°=North, 90°=East, clockwise) to SVG angle
+ * SVG: 0° is East, 90° is South, clockwise in screen coordinates
+ * True bearing: 0° is North, 90° is East, clockwise in geographical coordinates
+ * 
+ * Formula: SVG angle = 90° - true bearing
+ */
+export function bearingToSVGAngle(trueBearing: number): number {
+  return (90 - trueBearing + 360) % 360;
+}
+
+/**
+ * Verify that a line from (x1, y1) to (x2, y2) matches the expected true bearing
+ */
+export function verifyBearingLine(
+  x1: number, y1: number, 
+  x2: number, y2: number, 
+  expectedTrueBearing: number
+): { match: boolean; actualBearing: number; error: number } {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  
+  // SVG angle: atan2(dy, dx) where dy is downward-positive
+  const svgAngle = Math.atan2(dy, dx) * (180 / Math.PI);
+  
+  // Convert SVG angle back to true bearing
+  const actualBearing = (90 - svgAngle + 360) % 360;
+  
+  // Normalize difference
+  let error = actualBearing - expectedTrueBearing;
+  if (error > 180) error -= 360;
+  if (error < -180) error += 360;
+  error = Math.abs(error);
+  
+  return {
+    match: error <= 2,
+    actualBearing: (actualBearing + 360) % 360,
+    error,
+  };
 }
