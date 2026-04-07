@@ -152,27 +152,73 @@ function angleDiff(a: number, b: number): number {
   return d;
 }
 
+// ensure SVG points lie within chart bounds (with margin)
+function inBoundsSVG(p: { x: number; y: number }, margin = 20): boolean {
+  return p.x >= margin && p.x <= SVG_W - margin && p.y >= margin && p.y <= SVG_H - margin;
+}
+
 // ── Exercise generators ───────────────────────────────────────────────────────
 
 export function generateExercise1(cd: ChartData): Ex1DeadReckoning {
   const rng = seededRNG(cd.seed + 1001);
-  const dep = randomInWater(cd.depthFn, rng);
-  const courseDeg = Math.floor(rng() * 360);
-  const speedKn   = 4 + rng() * 6;
-  const timeMin   = 20 + Math.floor(rng() * 100);
-  const drPos     = destinationPoint(dep.lat, dep.lon, courseDeg, speedKn * (timeMin / 60));
-  const svgDR     = latLonToSVG(drPos.lat, drPos.lon);
+
+  // Attempt to generate a departure/dr position pair that both sit on the chart.
+  let dep: LatLon & SVGPoint | null = null;
+  let courseDeg = 0;
+  let speedKn = 0;
+  let timeMin = 0;
+  let drPos: LatLon | null = null;
+  let svgDR: SVGPoint | null = null;
+
+  for (let i = 0; i < 200; i++) {
+    const cand = randomInWater(cd.depthFn, rng);
+    const candCourse = Math.floor(rng() * 360);
+    const candSpeed = 4 + rng() * 6;
+    const candTime = 20 + Math.floor(rng() * 100);
+    const candDR = destinationPoint(cand.lat, cand.lon, candCourse, candSpeed * (candTime / 60));
+    const candSVGDR = latLonToSVG(candDR.lat, candDR.lon);
+
+    if (inBoundsSVG({ x: cand.x, y: cand.y }) && inBoundsSVG(candSVGDR)) {
+      dep = cand; courseDeg = candCourse; speedKn = candSpeed; timeMin = candTime;
+      drPos = candDR; svgDR = candSVGDR;
+      break;
+    }
+  }
+
+  // fallback: use a guaranteed-in-bounds centre if above loop failed
+  if (!dep) {
+    const cand = randomInWater(cd.depthFn, rng);
+    courseDeg = Math.floor(rng() * 360);
+    speedKn = 4 + rng() * 6;
+    timeMin = 20 + Math.floor(rng() * 100);
+    drPos = destinationPoint(cand.lat, cand.lon, courseDeg, speedKn * (timeMin / 60));
+    svgDR = latLonToSVG(drPos.lat, drPos.lon);
+    dep = cand;
+    // clamp svgDR into bounds by nudging back toward departure if necessary
+    const clampedX = Math.max(20, Math.min(SVG_W - 20, svgDR.x));
+    const clampedY = Math.max(20, Math.min(SVG_H - 20, svgDR.y));
+    if (clampedX !== svgDR.x || clampedY !== svgDR.y) {
+      // reproject clamped point to lat/lon and replace drPos/svgDR
+      drPos = svgToLatLon(clampedX, clampedY);
+      svgDR = { x: clampedX, y: clampedY };
+    }
+  }
 
   return {
     id: 1,
     title: 'Dead Reckoning',
-    departure: dep, courseDeg, speedKn, timeMin, drPos, svgDR,
+    departure: dep, courseDeg, speedKn, timeMin, drPos: drPos!, svgDR: svgDR!,
     infoHTML: `
       <h4>Exercise 1: Dead Reckoning</h4>
       <p>Departure position marked on chart (⊕).</p>
       <p><b>Course:</b> ${courseDeg}°T &nbsp; <b>Speed:</b> ${speedKn.toFixed(1)} kn</p>
       <p><b>Time underway:</b> ${Math.floor(timeMin / 60)}h ${timeMin % 60}min</p>
-      <p>Plot the DR position and mark it, then click <b>Submit</b>.</p>
+      <ol>
+        <li>Using the plotter or parallel rules, lay off the true course from the departure mark.</li>
+        <li>Compute distance = speed (kn) × time (h) → nautical miles.</li>
+        <li>Use dividers to measure that distance on the latitude scale and transfer it along the course line.</li>
+        <li>Mark the resulting point as the DR position and submit.</li>
+      </ol>
     `,
     enabledTools: ['pencil', 'parallel-rules', 'dividers', 'plotter'],
   };
@@ -197,9 +243,17 @@ export function generateExercise2(cd: ChartData): Ex2CourseToSteer {
     infoHTML: `
       <h4>Exercise 2: Course to Steer</h4>
       <p>Departure (⊕) and destination (⊗) marked on chart.</p>
-      <p>1. Read the true course using parallel rules or plotter.</p>
-      <p>2. Apply variation (${cd.variation}°W) → magnetic course.</p>
-      <p>3. Enter both values in the workbook, then click <b>Submit</b>.</p>
+      <ol>
+        <li>Align the parallel rules or plotter so the index mark reads the line from departure to destination — read the <b>true course</b> at the index mark.</li>
+        <li>Convert to magnetic: <b>Magnetic = True + Variation</b>. On most charts variation is shown as e.g. <em>3°W</em> — treat West as <b>add</b>, East as <b>subtract</b>.</li>
+        <li>If the chart gives an annual change (minutes per year), convert that to degrees (minutes/60) and apply for the years since the chart epoch:
+          <br><code>years = currentYear - chartYear</code>
+          <br><code>adjust = (annualChange_min_per_year / 60) * years</code>
+          <br><code>currentVariation = chartVariation + adjust</code>
+          Example: chart 3°W, decrease 2' per year, 5 years → adjust = -(2*5)/60 = -0.1667°, current = 3 - 0.1667 = 2.8333°W.</li>
+        <li>Enter the true and magnetic courses in the workbook and submit.</li>
+      </ol>
+      <p>Tip: use the plotter rose or chart meridians to ensure accurate alignment.</p>
     `,
     enabledTools: ['pencil', 'parallel-rules', 'plotter'],
   };
@@ -228,8 +282,15 @@ export function generateExercise3(cd: ChartData): Ex3CrossBearing {
       <p>Magnetic bearings from vessel to landmarks:</p>
       ${bearings.map(b => `<p><b>${b.lm.name}:</b> ${b.magBear.toFixed(1)}°M</p>`).join('')}
       <p>Variation: ${cd.variation}°W</p>
-      <p>1. Convert to true. 2. Plot reciprocal bearing lines from each landmark.
-      3. Mark fix at cocked hat. Then click <b>Submit</b>.</p>
+      <ol>
+        <li>Convert each magnetic bearing to true: <b>True = Magnetic - Variation</b> (apply sign: West add when converting True→Mag, so reverse when Mag→True).</li>
+        <li>If a chart epoch and annual change are given, compute current variation first using minutes/year converted to degrees:
+          <br><code>currentVariation = chartVariation + (annualChange_min_per_year/60) * yearsSinceChart</code>
+          Check whether the chart wording says "increase" or "decrease" to set the sign of annualChange.</li>
+        <li>For each landmark, plot the <b>reciprocal</b> of the true bearing (add 180°) from the landmark outwards — use parallel rules or plotter to align.</li>
+        <li>The intersection (or cocked-hat) of at least two lines is your fix — mark it and submit.</li>
+      </ol>
+      <p>Tip: use three bearings when available; the cocked-hat gives a measure of accuracy.</p>
     `,
     enabledTools: ['pencil', 'parallel-rules', 'plotter', 'compass'],
   };
@@ -264,9 +325,12 @@ export function generateExercise4(cd: ChartData): Ex4DistanceETA {
       <h4>Exercise 4: Distance &amp; ETA</h4>
       <p>Course line from ⊕ to ⊗ is shown.</p>
       <p><b>Speed:</b> ${speedKn.toFixed(1)} kn &nbsp; <b>Departure:</b> ${depTime}</p>
-      <p>1. Measure distance with dividers against latitude scale.</p>
-      <p>2. Use S-T-D calculator to get time underway.</p>
-      <p>3. Add to departure time → enter ETA in workbook, then click <b>Submit</b>.</p>
+      <ol>
+        <li>Use dividers to measure the course distance on the chart and transfer to the latitude scale to get nautical miles.</li>
+        <li>Compute time underway: Time (h) = Distance (NM) / Speed (kn). Convert to minutes if needed.</li>
+        <li>Add the time to the departure time to obtain the ETA; use the STD panel if helpful.</li>
+        <li>Enter the measured distance and ETA in the workbook and submit.</li>
+      </ol>
     `,
     enabledTools: ['dividers', 'std'],
   };
@@ -297,9 +361,12 @@ export function generateExercise5(cd: ChartData): Ex5ClearingBearing {
       <h4>Exercise 5: Clearing Bearing</h4>
       <p>Hazard (shoal) marked on chart.</p>
       <p>Landmark: <b>${lm?.name ?? 'Landmark'}</b>.</p>
-      <p>Draw a clearing bearing line such that maintaining a bearing
-      <b>less than</b> the clearing bearing from the landmark keeps you clear.</p>
-      <p>State the clearing bearing value, then click <b>Submit</b>.</p>
+      <ol>
+        <li>From the landmark, use parallel rules or the plotter to read the true bearing to the hazard.</li>
+        <li>The clearing bearing is the bearing from the landmark such that bearings <b>less than</b> this value keep you clear of the hazard.</li>
+        <li>Draw the clearing bearing line from the landmark toward open water and record the bearing value.</li>
+        <li>Submit the bearing value.</li>
+      </ol>
     `,
     enabledTools: ['pencil', 'parallel-rules', 'plotter'],
   };
@@ -307,30 +374,81 @@ export function generateExercise5(cd: ChartData): Ex5ClearingBearing {
 
 export function generateExercise6(cd: ChartData): Ex6SetAndDrift {
   const rng = seededRNG(cd.seed + 6006);
-  const dep = randomInWater(cd.depthFn, rng, 10);
-  const courseDeg = Math.floor(rng() * 360);
-  const speedKn   = 4 + rng() * 4;
-  const timeMin   = 30 + Math.floor(rng() * 60);
-  const timeHr    = timeMin / 60;
 
-  const drPos = destinationPoint(dep.lat, dep.lon, courseDeg, speedKn * timeHr);
-  const setCurrent = Math.floor(rng() * 360);
-  const driftRate  = 0.3 + rng() * 1.2;
-  const fixPos     = destinationPoint(drPos.lat, drPos.lon, setCurrent, driftRate * timeHr);
+  // Ensure departure, DR and fix positions are all inside the chart bounds.
+  let dep: LatLon & SVGPoint | null = null;
+  let courseDeg = 0;
+  let speedKn = 0;
+  let timeMin = 0;
+  let timeHr = 0;
+  let drPos: LatLon | null = null;
+  let fixPos: LatLon | null = null;
+  let setCurrent = 0;
+  let driftRate = 0;
+
+  for (let i = 0; i < 200; i++) {
+    const cand = randomInWater(cd.depthFn, rng, 10);
+    const candCourse = Math.floor(rng() * 360);
+    const candSpeed = 4 + rng() * 4;
+    const candTime = 30 + Math.floor(rng() * 60);
+    const candTimeHr = candTime / 60;
+    const candDR = destinationPoint(cand.lat, cand.lon, candCourse, candSpeed * candTimeHr);
+    const candSet = Math.floor(rng() * 360);
+    const candDriftRate = 0.3 + rng() * 1.2;
+    const candFix = destinationPoint(candDR.lat, candDR.lon, candSet, candDriftRate * candTimeHr);
+
+    const svgDR = latLonToSVG(candDR.lat, candDR.lon);
+    const svgFix = latLonToSVG(candFix.lat, candFix.lon);
+
+    if (inBoundsSVG({ x: cand.x, y: cand.y }) && inBoundsSVG(svgDR) && inBoundsSVG(svgFix)) {
+      dep = cand; courseDeg = candCourse; speedKn = candSpeed; timeMin = candTime; timeHr = candTimeHr;
+      drPos = candDR; fixPos = candFix; setCurrent = candSet; driftRate = candDriftRate;
+      break;
+    }
+  }
+
+  // fallback: generate once and clamp if needed
+  if (!dep) {
+    const cand = randomInWater(cd.depthFn, rng, 10);
+    courseDeg = Math.floor(rng() * 360);
+    speedKn = 4 + rng() * 4;
+    timeMin = 30 + Math.floor(rng() * 60);
+    timeHr = timeMin / 60;
+    drPos = destinationPoint(cand.lat, cand.lon, courseDeg, speedKn * timeHr);
+    setCurrent = Math.floor(rng() * 360);
+    driftRate = 0.3 + rng() * 1.2;
+    fixPos = destinationPoint(drPos.lat, drPos.lon, setCurrent, driftRate * timeHr);
+    dep = cand;
+
+    // clamp DR and Fix into chart bounds if necessary
+    let svgDR = latLonToSVG(drPos.lat, drPos.lon);
+    let svgFix = latLonToSVG(fixPos.lat, fixPos.lon);
+    const clampedDRX = Math.max(20, Math.min(SVG_W - 20, svgDR.x));
+    const clampedDRY = Math.max(20, Math.min(SVG_H - 20, svgDR.y));
+    const clampedFixX = Math.max(20, Math.min(SVG_W - 20, svgFix.x));
+    const clampedFixY = Math.max(20, Math.min(SVG_H - 20, svgFix.y));
+
+    if (clampedDRX !== svgDR.x || clampedDRY !== svgDR.y) drPos = svgToLatLon(clampedDRX, clampedDRY);
+    if (clampedFixX !== svgFix.x || clampedFixY !== svgFix.y) fixPos = svgToLatLon(clampedFixX, clampedFixY);
+  }
 
   return {
     id: 6,
     title: 'Set and Drift',
-    departure: dep, courseDeg, speedKn, timeMin,
-    drPos, fixPos, setCurrent, driftRate,
-    svgDR:  latLonToSVG(drPos.lat, drPos.lon),
-    svgFix: latLonToSVG(fixPos.lat, fixPos.lon),
+    departure: dep!, courseDeg, speedKn, timeMin,
+    drPos: drPos!, fixPos: fixPos!, setCurrent, driftRate,
+    svgDR:  latLonToSVG(drPos!.lat, drPos!.lon),
+    svgFix: latLonToSVG(fixPos!.lat, fixPos!.lon),
     infoHTML: `
       <h4>Exercise 6: Set and Drift</h4>
       <p>Dep (⊕) — course ${courseDeg}°T, speed ${speedKn.toFixed(1)} kn, ${timeMin} min.</p>
       <p>Fix (⊗) is shown after elapsed time.</p>
-      <p>1. Plot DR position. 2. Draw vector DR→Fix.
-      3. Measure set (direction) and drift rate. Then click <b>Submit</b>.</p>
+      <ol>
+        <li>Use the plotter/parallel rules to lay off the dead-reckoned (DR) position from departure using course and distance (speed × time).</li>
+        <li>Draw a vector from the DR point to the actual fix (DR → Fix) using the pencil tool.</li>
+        <li>Measure the bearing (set) of that vector with the plotter and the length (distance) with dividers.</li>
+        <li>Drift rate = distance (NM) / time (h). Record set (°T) and drift rate (kn) and submit.</li>
+      </ol>
     `,
     enabledTools: ['pencil', 'parallel-rules', 'dividers', 'plotter'],
   };
