@@ -1,0 +1,387 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #app {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  font-family: 'Courier New', monospace;
+  background: #1a1a2e;
+  color: #e0e0e0;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────── */
+#toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #16213e;
+  border-bottom: 2px solid #0f3460;
+  padding: 4px 8px;
+  gap: 6px;
+  flex-wrap: wrap;
+  z-index: 100;
+}
+
+#toolbar-tools {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+#toolbar-right {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tool-btn, #btn-new-chart, #btn-exercise-menu {
+  background: #0f3460;
+  color: #e0e0e0;
+  border: 1px solid #1a5276;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.tool-btn:hover, #btn-new-chart:hover, #btn-exercise-menu:hover {
+  background: #1a5276;
+}
+
+.tool-btn.active {
+  background: #2e86ab;
+  border-color: #3fa7d6;
+  color: #fff;
+}
+
+.tool-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Exercise dropdown ───────────────────────────────────────── */
+#exercise-picker {
+  position: relative;
+}
+
+#exercise-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  z-index: 200;
+  min-width: 180px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+
+#exercise-dropdown button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #0f3460;
+  color: #e0e0e0;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+#exercise-dropdown button:last-child { border-bottom: none; }
+#exercise-dropdown button:hover { background: #0f3460; }
+
+.hidden { display: none !important; }
+
+/* ── Chart wrap ──────────────────────────────────────────────── */
+#chart-wrap {
+  flex: 1 1 auto;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+}
+
+#chart-wrap.cursor-crosshair { cursor: crosshair; }
+#chart-wrap.cursor-default   { cursor: default; }
+
+#chart-svg {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  display: block;
+}
+
+#draw-canvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none; /* canvas is transparent to pointer; tool-layer handles events */
+}
+
+#tool-layer {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+
+/* ── Feedback overlay ────────────────────────────────────────── */
+#feedback-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+
+#feedback-box {
+  background: #16213e;
+  border: 2px solid #2e86ab;
+  border-radius: 8px;
+  padding: 24px 32px;
+  max-width: 480px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+
+#feedback-title {
+  color: #3fa7d6;
+  margin-bottom: 12px;
+  font-size: 16px;
+}
+
+#feedback-body {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #c8d6e5;
+  margin-bottom: 16px;
+}
+
+#feedback-body .score-good  { color: #55efc4; }
+#feedback-body .score-ok    { color: #ffeaa7; }
+#feedback-body .score-bad   { color: #ff7675; }
+
+#feedback-close {
+  background: #2e86ab;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 7px 20px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+/* ── Workbook strip ──────────────────────────────────────────── */
+#workbook {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+  background: #16213e;
+  border-top: 2px solid #0f3460;
+  padding: 4px 8px;
+  font-size: 12px;
+  min-height: 32px;
+}
+
+.wb-field {
+  padding: 2px 10px 2px 0;
+  border-right: 1px solid #0f3460;
+  margin-right: 10px;
+  white-space: nowrap;
+  color: #a0b4c8;
+}
+
+.wb-field span {
+  color: #e0e0e0;
+  font-weight: bold;
+}
+
+.wb-field input[type="number"],
+.wb-field input[type="time"] {
+  background: #0f3460;
+  border: 1px solid #1a5276;
+  color: #e0e0e0;
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-size: 12px;
+  font-family: inherit;
+  width: 70px;
+}
+
+#wb-submit {
+  background: #2e86ab;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+/* ── Tool overlays (DOM-based) ───────────────────────────────── */
+.tool-overlay {
+  position: absolute;
+  pointer-events: all;
+  user-select: none;
+  touch-action: none;
+}
+
+/* Parallel rules */
+.parallel-rule {
+  position: absolute;
+  background: rgba(30, 50, 80, 0.75);
+  border: 1.5px solid #4a90d9;
+  border-radius: 2px;
+  cursor: move;
+  touch-action: none;
+}
+
+.rule-hinge {
+  position: absolute;
+  width: 12px; height: 12px;
+  background: #4a90d9;
+  border-radius: 50%;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+}
+
+/* Bearing tooltip */
+.bearing-tooltip {
+  position: absolute;
+  background: rgba(0,0,0,0.8);
+  color: #3fa7d6;
+  font-size: 13px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 50;
+  font-family: 'Courier New', monospace;
+}
+
+/* Dividers */
+#dividers-svg {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.divider-handle {
+  cursor: move;
+  pointer-events: all;
+}
+
+/* Portland plotter */
+#plotter-container {
+  position: absolute;
+  pointer-events: all;
+  touch-action: none;
+}
+
+/* STD calculator */
+#std-panel {
+  position: absolute;
+  background: #16213e;
+  border: 2px solid #2e86ab;
+  border-radius: 8px;
+  padding: 16px;
+  width: 260px;
+  z-index: 150;
+  cursor: move;
+  touch-action: none;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  font-size: 13px;
+}
+
+#std-panel h4 {
+  color: #3fa7d6;
+  margin-bottom: 12px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.std-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.std-row label { flex: 0 0 70px; color: #a0b4c8; }
+
+.std-row input {
+  flex: 1;
+  background: #0f3460;
+  border: 1px solid #1a5276;
+  color: #e0e0e0;
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.std-row .unit { color: #6c8ebf; font-size: 11px; }
+
+.std-computed {
+  background: #0a2040;
+  border-radius: 3px;
+  padding: 3px 6px;
+  color: #55efc4;
+  font-weight: bold;
+}
+
+#std-push-btn {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  background: #2e86ab;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+/* Exercise info panel */
+#exercise-info {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(22, 33, 62, 0.92);
+  border: 1px solid #2e86ab;
+  border-radius: 6px;
+  padding: 12px 16px;
+  max-width: 280px;
+  font-size: 12px;
+  z-index: 120;
+  line-height: 1.6;
+  color: #c8d6e5;
+}
+
+#exercise-info h4 {
+  color: #3fa7d6;
+  margin-bottom: 8px;
+  font-size: 13px;
+}

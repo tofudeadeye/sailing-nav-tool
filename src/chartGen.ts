@@ -1,0 +1,740 @@
+import { createNoise2D, type Noise2D } from './noise.ts';
+import { SVG_W, SVG_H, latLonToSVG, CHART_BOUNDS, svgToLatLon } from './coords.ts';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export type LandmarkType = 'lighthouse' | 'church' | 'mast' | 'tower';
+
+export interface Landmark {
+  type: LandmarkType;
+  x: number;    // SVG space
+  y: number;
+  name: string;
+}
+
+export interface Sounding {
+  x: number;
+  y: number;
+  depth: number;
+}
+
+export interface ContourPoint {
+  x: number;
+  y: number;
+}
+
+export type ContourSegment = [ContourPoint, ContourPoint];
+
+export interface Shoal {
+  x: number;
+  y: number;
+  r: number;
+}
+
+export type BuoySide = 'port' | 'starboard';
+export type CardinalDirection = 'north' | 'south' | 'east' | 'west';
+
+export interface ChannelBuoy {
+  x: number;
+  y: number;
+  side: BuoySide;
+}
+
+export interface CardinalBuoy {
+  x: number;
+  y: number;
+  type: CardinalDirection;
+  name: string;
+}
+
+export interface Harbour {
+  entrance: { x: number; y: number };
+  portPier:  { x: number; y: number };
+  stbdPier:  { x: number; y: number };
+  portInner: { x: number; y: number };
+  stbdInner: { x: number; y: number };
+  buoys: ChannelBuoy[];
+  name: string;
+}
+
+export interface CompassRose {
+  x: number;
+  y: number;
+  r: number;
+}
+
+export interface Anchorage {
+  x: number;
+  y: number;
+  name: string;
+}
+
+/** Depth function: returns depth in metres, or -1 if the point is on land. */
+export type DepthFn = (x: number, y: number) => number;
+
+export interface ChartData {
+  seed: number;
+  variation: number;     // degrees West, positive
+  coastPts: Array<{ x: number; y: number }>;
+  depthFn: DepthFn;
+  soundings: Sounding[];
+  contours: Record<number, ContourSegment[]>;
+  shoals: Shoal[];
+  landmarks: Landmark[];
+  harbour: Harbour;
+  cardinalBuoys: CardinalBuoy[];
+  compassRose: CompassRose;
+  anchorages: Anchorage[];
+}
+
+// ── Seeded PRNG ───────────────────────────────────────────────────────────────
+
+function makeRNG(seed: number): () => number {
+  let s = ((seed ^ 0xdeadbeef) >>> 0) || 1;
+  return (): number => {
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    return (s >>> 0) / 4294967296;
+  };
+}
+
+// ── Coastline ─────────────────────────────────────────────────────────────────
+
+function buildCoastlinePoints(
+  noise: Noise2D,
+): Array<{ x: number; y: number }> {
+  const STEPS = 400;
+  const pts: Array<{ x: number; y: number }> = [];
+
+  for (let i = 0; i <= STEPS; i++) {
+    const t = i / STEPS;
+    const n1 = noise(t * 3, 0.5) * 0.18;
+    const n2 = noise(t * 7, 1.5) * 0.07;
+    const n3 = noise(t * 15, 3.0) * 0.03;
+    const rawX = SVG_W * (0.52 + n1 + n2 + n3 + 0.06 * Math.sin(t * Math.PI * 2.5));
+    pts.push({
+      x: Math.max(SVG_W * 0.25, Math.min(SVG_W * 0.85, rawX)),
+      y: t * SVG_H,
+    });
+  }
+
+  return pts;
+}
+
+// ── Depth field ───────────────────────────────────────────────────────────────
+
+function buildDepthField(
+  coastPts: Array<{ x: number; y: number }>,
+  noise: Noise2D,
+): DepthFn {
+  // Build a per-row coast x lookup for fast distance queries
+  const lookup = new Float32Array(SVG_H + 1);
+  const maxIdx = coastPts.length - 3;
+  for (let yi = 0; yi <= SVG_H; yi++) {
+    const idx = Math.min(Math.round((yi / SVG_H) * maxIdx), maxIdx);
+    lookup[yi] = coastPts[idx]!.x;
+  }
+
+  return (x: number, y: number): number => {
+    const yi = Math.max(0, Math.min(SVG_H, Math.round(y)));
+    const coastX = lookup[yi]!;
+    const dist = coastX - x; // positive = water side
+    if (dist <= 0) return -1;
+    const base = Math.min(60, (dist / (SVG_W * 0.45)) * 70);
+    const n = noise(x / 300, y / 300) * 8;
+    const channelBoost = Math.max(0, 10 - Math.abs(x - SVG_W * 0.3) / 30);
+    return Math.max(2, base + n + channelBoost);
+  };
+}
+
+// ── Soundings ─────────────────────────────────────────────────────────────────
+
+function buildSoundings(depthFn: DepthFn, rng: () => number): Sounding[] {
+  const soundings: Sounding[] = [];
+  for (let attempt = 0; attempt < 600; attempt++) {
+    const x = rng() * SVG_W;
+    const y = rng() * SVG_H;
+    const d = depthFn(x, y);
+    if (d < 2) continue;
+    if (x < 30 || x > SVG_W - 30 || y < 30 || y > SVG_H - 30) continue;
+    soundings.push({ x, y, depth: Math.round(d) });
+  }
+  return soundings;
+}
+
+// ── Depth contours (marching squares) ────────────────────────────────────────
+
+function buildContours(
+  depthFn: DepthFn,
+  thresholds: number[],
+): Record<number, ContourSegment[]> {
+  const GRID = 30;
+  const cols = Math.floor(SVG_W / GRID);
+  const rows = Math.floor(SVG_H / GRID);
+  const results: Record<number, ContourSegment[]> = {};
+
+  for (const thr of thresholds) {
+    const segments: ContourSegment[] = [];
+    for (let r = 0; r < rows - 1; r++) {
+      for (let c = 0; c < cols - 1; c++) {
+        const x0 = c * GRID, y0 = r * GRID;
+        const x1 = x0 + GRID, y1 = y0 + GRID;
+        const v: [number, number, number, number] = [
+          depthFn(x0, y0), depthFn(x1, y0),
+          depthFn(x1, y1), depthFn(x0, y1),
+        ];
+        const above = v.map(d => d >= thr && d >= 0) as [boolean, boolean, boolean, boolean];
+        const idx =
+          (above[0] ? 8 : 0) | (above[1] ? 4 : 0) |
+          (above[2] ? 2 : 0) | (above[3] ? 1 : 0);
+        if (idx === 0 || idx === 15) continue;
+
+        const lerp = (a: number, b: number, va: number, vb: number): number =>
+          a + (b - a) * ((thr - va) / (vb - va));
+
+        const pts = {
+          T: { x: lerp(x0, x1, v[0], v[1]), y: y0 },
+          R: { x: x1, y: lerp(y0, y1, v[1], v[2]) },
+          B: { x: lerp(x0, x1, v[3], v[2]), y: y1 },
+          L: { x: x0, y: lerp(y0, y1, v[0], v[3]) },
+        };
+
+        const edgeMap: Record<number, ContourSegment> = {
+          1:  [pts.B, pts.L],  2:  [pts.R, pts.B],  3:  [pts.R, pts.L],
+          4:  [pts.T, pts.R],  5:  [pts.T, pts.R],  6:  [pts.T, pts.B],
+          7:  [pts.T, pts.L],  8:  [pts.T, pts.L],  9:  [pts.T, pts.B],
+          10: [pts.L, pts.B],  11: [pts.R, pts.T],  12: [pts.R, pts.L],
+          13: [pts.B, pts.R],  14: [pts.L, pts.B],
+        };
+        const seg = edgeMap[idx];
+        if (seg) segments.push(seg);
+      }
+    }
+    results[thr] = segments;
+  }
+  return results;
+}
+
+// ── Shoals ────────────────────────────────────────────────────────────────────
+
+function buildShoals(depthFn: DepthFn, rng: () => number): Shoal[] {
+  const shoals: Shoal[] = [];
+  for (let attempt = 0; attempt < 200 && shoals.length < 6; attempt++) {
+    const x = rng() * SVG_W * 0.55;
+    const y = rng() * SVG_H;
+    const d = depthFn(x, y);
+    if (d < 3 || d > 15) continue;
+    shoals.push({ x, y, r: 8 + rng() * 20 });
+  }
+  return shoals;
+}
+
+// ── Landmarks ─────────────────────────────────────────────────────────────────
+
+function placeLandmarks(
+  coastPts: Array<{ x: number; y: number }>,
+  depthFn: DepthFn,
+  rng: () => number,
+): Landmark[] {
+  const landmarks: Landmark[] = [];
+  const types: LandmarkType[] = ['lighthouse', 'church', 'mast', 'tower'];
+
+  for (const type of types) {
+    for (let attempt = 0; attempt < 300; attempt++) {
+      const ci = Math.floor(rng() * (coastPts.length - 3));
+      const cp = coastPts[ci]!;
+      const x = cp.x + 15 + rng() * 120;
+      const y = cp.y + (rng() - 0.5) * 60;
+      if (x < 0 || x > SVG_W || y < 0 || y > SVG_H) continue;
+      if (depthFn(x, y) > 0) continue; // must be on land
+      if (landmarks.some(l => Math.hypot(l.x - x, l.y - y) < 120)) continue;
+      landmarks.push({ type, x, y, name: landmarkName(type, rng) });
+      break;
+    }
+  }
+  return landmarks;
+}
+
+function landmarkName(type: LandmarkType, rng: () => number): string {
+  const names: Record<LandmarkType, string[]> = {
+    lighthouse: ['Pt. Moran Lt', 'Breakwater Lt', 'Haven Lt', 'Old Head Lt', 'Black Rock Lt'],
+    church:     ["St. Brendan's", 'All Saints', "St. Michael's", 'Chapel Hill', 'Old Church'],
+    mast:       ['Radio Mast', 'TV Mast', 'Signal Mast', 'Comm. Tower'],
+    tower:      ['Water Twr', 'Mill Tower', 'Old Tower', 'Barrow Twr'],
+  };
+  const arr = names[type];
+  return arr[Math.floor(rng() * arr.length)]!;
+}
+
+// ── Harbour ───────────────────────────────────────────────────────────────────
+
+function buildHarbour(
+  coastPts: Array<{ x: number; y: number }>,
+  rng: () => number,
+): Harbour {
+  const ci = Math.min(
+    Math.floor(coastPts.length * 0.35 + rng() * coastPts.length * 0.3),
+    coastPts.length - 3,
+  );
+  const entrance = coastPts[ci]!;
+  const hw = 40 + rng() * 30;
+  const depth = 60 + rng() * 60;
+
+  const portPier  = { x: entrance.x + 10, y: entrance.y - hw };
+  const stbdPier  = { x: entrance.x + 10, y: entrance.y + hw };
+  const portInner = { x: entrance.x + depth, y: entrance.y - hw * 0.3 };
+  const stbdInner = { x: entrance.x + depth, y: entrance.y + hw * 0.3 };
+
+  const buoys: ChannelBuoy[] = [];
+  for (let i = 1; i <= 4; i++) {
+    const t = i / 4.5;
+    const cx = entrance.x - t * SVG_W * 0.18;
+    buoys.push(
+      { x: cx, y: entrance.y - 22, side: 'port' },
+      { x: cx, y: entrance.y + 22, side: 'starboard' },
+    );
+  }
+
+  const names = ['Port Carrig', 'Havenmouth', 'Dunmore Hbr', 'Cwm Harbour'] as const;
+  return {
+    entrance, portPier, stbdPier, portInner, stbdInner, buoys,
+    name: names[Math.floor(rng() * names.length)]!,
+  };
+}
+
+// ── Cardinal buoys ────────────────────────────────────────────────────────────
+
+function buildCardinalBuoys(shoals: Shoal[]): CardinalBuoy[] {
+  return shoals.slice(0, 3).map(s => ({
+    x: s.x,
+    y: s.y - 35,
+    type: 'north' as const,
+    name: 'N Card',
+  }));
+}
+
+// ── Compass rose placement ────────────────────────────────────────────────────
+
+function placeCompassRose(depthFn: DepthFn, rng: () => number): CompassRose {
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const x = SVG_W * (0.05 + rng() * 0.35);
+    const y = SVG_H * (0.1 + rng() * 0.8);
+    if (depthFn(x, y) < 20) continue;
+    if (x < 80 || y < 80 || x > SVG_W - 80 || y > SVG_H - 80) continue;
+    return { x, y, r: 90 };
+  }
+  return { x: SVG_W * 0.18, y: SVG_H * 0.25, r: 90 };
+}
+
+// ── Anchorages ────────────────────────────────────────────────────────────────
+
+function buildAnchorages(depthFn: DepthFn, rng: () => number): Anchorage[] {
+  const anchorages: Anchorage[] = [];
+  const names = ['Gull Roads', 'Blind Cove', 'The Haven', 'East Road'] as const;
+  for (let attempt = 0; attempt < 200 && anchorages.length < 2; attempt++) {
+    const x = rng() * SVG_W * 0.6;
+    const y = rng() * SVG_H;
+    const d = depthFn(x, y);
+    if (d < 5 || d > 20) continue;
+    if (anchorages.some(a => Math.hypot(a.x - x, a.y - y) < 100)) continue;
+    anchorages.push({ x, y, name: names[anchorages.length] ?? 'Anchorage' });
+  }
+  return anchorages;
+}
+
+// ── SVG helpers ───────────────────────────────────────────────────────────────
+
+const NS = 'http://www.w3.org/2000/svg';
+
+type Attrs = Record<string, string | number>;
+
+function el(
+  tag: string,
+  attrs: Attrs,
+  parent?: Element,
+): SVGElement {
+  const e = document.createElementNS(NS, tag) as SVGElement;
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+  parent?.appendChild(e);
+  return e;
+}
+
+function txt(
+  content: string,
+  attrs: Attrs,
+  parent?: Element,
+): SVGTextElement {
+  const e = document.createElementNS(NS, 'text') as SVGTextElement;
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+  e.textContent = content;
+  parent?.appendChild(e);
+  return e;
+}
+
+function polyPts(pts: Array<{ x: number; y: number }>): string {
+  return pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+}
+
+function grp(id: string, parent: Element): SVGGElement {
+  const g = document.createElementNS(NS, 'g') as SVGGElement;
+  if (id) g.id = id;
+  parent.appendChild(g);
+  return g;
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
+function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
+  svgEl.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
+  svgEl.setAttribute('width', String(SVG_W));
+  svgEl.setAttribute('height', String(SVG_H));
+  while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+
+  const { coastPts, soundings, contours, shoals, landmarks, harbour,
+          cardinalBuoys, compassRose, anchorages, variation, seed } = data;
+
+  // Clip path
+  const defs = el('defs', {}, svgEl);
+  const clip = el('clipPath', { id: 'chartClip' }, defs);
+  el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H }, clip);
+
+  // Water
+  el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H, fill: '#b8d4e8' }, svgEl);
+
+  // Land
+  const landG = grp('land', svgEl);
+  const landPoly = [...coastPts, { x: SVG_W, y: SVG_H }, { x: SVG_W, y: 0 }];
+  el('polygon', {
+    points: polyPts(landPoly),
+    fill: '#f5f0dc', stroke: '#8b7355', 'stroke-width': 1.5,
+  }, landG);
+
+  // Depth contours
+  const contourColors: Record<number, string> = { 5: '#7aafc8', 10: '#5b9ab5', 20: '#3d7fa0' };
+  const contourG = grp('contours', svgEl);
+  for (const [thrStr, segs] of Object.entries(contours)) {
+    const color = contourColors[Number(thrStr)] ?? '#5b9ab5';
+    for (const seg of segs) {
+      el('line', {
+        x1: seg[0].x, y1: seg[0].y, x2: seg[1].x, y2: seg[1].y,
+        stroke: color, 'stroke-width': 0.8, 'stroke-dasharray': '4,3', opacity: 0.7,
+      }, contourG);
+    }
+  }
+
+  // Shoals
+  const shoalG = grp('shoals', svgEl);
+  for (const s of shoals) {
+    el('ellipse', {
+      cx: s.x, cy: s.y, rx: s.r * 1.4, ry: s.r * 0.9,
+      fill: 'none', stroke: '#8b7355', 'stroke-width': 1, 'stroke-dasharray': '3,2',
+    }, shoalG);
+    txt('*', {
+      x: s.x, y: s.y + 4,
+      'text-anchor': 'middle', 'font-size': 14, fill: '#8b5e3c', 'font-style': 'italic',
+    }, shoalG);
+  }
+
+  // Soundings
+  const sdG = grp('soundings', svgEl);
+  for (const s of soundings) {
+    txt(String(s.depth), {
+      x: s.x, y: s.y,
+      'text-anchor': 'middle', 'font-size': 10, 'font-style': 'italic',
+      fill: '#1a5276', 'font-family': 'Georgia, serif',
+    }, sdG);
+  }
+
+  // Harbour
+  const harbG = grp('harbour', svgEl);
+  el('line', {
+    x1: harbour.portPier.x,  y1: harbour.portPier.y,
+    x2: harbour.portInner.x, y2: harbour.portInner.y,
+    stroke: '#4a4a4a', 'stroke-width': 4, 'stroke-linecap': 'round',
+  }, harbG);
+  el('line', {
+    x1: harbour.stbdPier.x,  y1: harbour.stbdPier.y,
+    x2: harbour.stbdInner.x, y2: harbour.stbdInner.y,
+    stroke: '#4a4a4a', 'stroke-width': 4, 'stroke-linecap': 'round',
+  }, harbG);
+  txt(harbour.name, {
+    x: harbour.entrance.x + 80, y: harbour.entrance.y + 14,
+    'text-anchor': 'middle', 'font-size': 11,
+    fill: '#1a3a5c', 'font-style': 'italic', 'font-family': 'Georgia, serif',
+  }, harbG);
+
+  // Buoys
+  const buoyG = grp('buoys', svgEl);
+  for (const b of harbour.buoys)  drawChannelBuoy(b, buoyG);
+  for (const b of cardinalBuoys)  drawCardinalBuoy(b, buoyG);
+
+  // Anchorages
+  const anchG = grp('anchorages', svgEl);
+  for (const a of anchorages) {
+    el('circle', { cx: a.x, cy: a.y, r: 10, fill: 'none', stroke: '#1a5276', 'stroke-width': 1.5 }, anchG);
+    el('line', { x1: a.x, y1: a.y - 10, x2: a.x, y2: a.y + 10, stroke: '#1a5276', 'stroke-width': 1.5 }, anchG);
+    el('line', { x1: a.x - 8, y1: a.y + 6, x2: a.x + 8, y2: a.y + 6, stroke: '#1a5276', 'stroke-width': 1.5 }, anchG);
+    txt(a.name, {
+      x: a.x + 14, y: a.y + 4,
+      'font-size': 10, fill: '#1a5276', 'font-style': 'italic', 'font-family': 'Georgia, serif',
+    }, anchG);
+  }
+
+  // Landmarks
+  const lmG = grp('landmarks', svgEl);
+  for (const lm of landmarks) drawLandmark(lm, lmG);
+
+  // Grid, rose, scale bar, title
+  renderGrid(svgEl);
+  renderCompassRose(compassRose, svgEl, variation);
+  renderScaleBar(svgEl);
+  renderTitleBlock(svgEl, variation, seed);
+}
+
+function drawChannelBuoy(b: ChannelBuoy, parent: Element): void {
+  if (b.side === 'port') {
+    el('rect', { x: b.x - 7, y: b.y - 12, width: 14, height: 16, rx: 3, fill: '#cc2222', stroke: '#881111', 'stroke-width': 1 }, parent);
+    el('line', { x1: b.x, y1: b.y + 4, x2: b.x, y2: b.y + 18, stroke: '#cc2222', 'stroke-width': 1.5 }, parent);
+  } else {
+    const pts = `${b.x},${b.y - 14} ${b.x - 8},${b.y + 4} ${b.x + 8},${b.y + 4}`;
+    el('polygon', { points: pts, fill: '#22aa44', stroke: '#116622', 'stroke-width': 1 }, parent);
+    el('line', { x1: b.x, y1: b.y + 4, x2: b.x, y2: b.y + 18, stroke: '#22aa44', 'stroke-width': 1.5 }, parent);
+  }
+}
+
+function drawCardinalBuoy(b: CardinalBuoy, parent: Element): void {
+  const { x, y } = b;
+  el('rect', { x: x - 5, y: y - 20, width: 10, height: 10, fill: '#000000' }, parent);
+  el('rect', { x: x - 5, y: y - 10, width: 10, height: 10, fill: '#ffcc00' }, parent);
+  el('polygon', { points: `${x},${y - 32} ${x - 6},${y - 22} ${x + 6},${y - 22}`, fill: '#000' }, parent);
+  el('polygon', { points: `${x},${y - 40} ${x - 6},${y - 30} ${x + 6},${y - 30}`, fill: '#000' }, parent);
+  el('line', { x1: x, y1: y, x2: x, y2: y + 14, stroke: '#333', 'stroke-width': 1.5 }, parent);
+  txt('N', { x: x + 9, y: y - 10, 'font-size': 9, fill: '#000', 'font-weight': 'bold' }, parent);
+}
+
+function drawLandmark(lm: Landmark, parent: Element): void {
+  const { x, y, type, name } = lm;
+  switch (type) {
+    case 'lighthouse':
+      el('circle', { cx: x, cy: y, r: 8, fill: '#cc44aa', stroke: '#881177', 'stroke-width': 1.5 }, parent);
+      for (let a = 0; a < 360; a += 45) {
+        const rad = (a * Math.PI) / 180;
+        el('line', {
+          x1: x + 9 * Math.cos(rad),  y1: y + 9 * Math.sin(rad),
+          x2: x + 15 * Math.cos(rad), y2: y + 15 * Math.sin(rad),
+          stroke: '#cc44aa', 'stroke-width': 1.5,
+        }, parent);
+      }
+      break;
+    case 'church':
+      el('line', { x1: x, y1: y - 12, x2: x, y2: y + 8,  stroke: '#333', 'stroke-width': 2.5 }, parent);
+      el('line', { x1: x - 7, y1: y - 4, x2: x + 7, y2: y - 4, stroke: '#333', 'stroke-width': 2.5 }, parent);
+      break;
+    case 'mast':
+      el('line', { x1: x, y1: y - 14, x2: x, y2: y + 6,  stroke: '#333', 'stroke-width': 2 }, parent);
+      el('line', { x1: x - 8, y1: y - 8, x2: x + 8, y2: y - 8, stroke: '#333', 'stroke-width': 2 }, parent);
+      el('line', { x1: x - 5, y1: y, x2: x + 5, y2: y,   stroke: '#333', 'stroke-width': 1.5 }, parent);
+      el('circle', { cx: x, cy: y - 14, r: 3, fill: '#333' }, parent);
+      break;
+    case 'tower':
+      el('circle', { cx: x, cy: y - 10, r: 6, fill: 'none', stroke: '#333', 'stroke-width': 2 }, parent);
+      el('line', { x1: x, y1: y - 4, x2: x, y2: y + 6, stroke: '#333', 'stroke-width': 2 }, parent);
+      break;
+  }
+  txt(name, {
+    x: x + 12, y: y + 4,
+    'font-size': 10, fill: '#1a1a1a',
+    'font-family': 'Georgia, serif', 'font-style': 'italic',
+  }, parent);
+}
+
+function renderGrid(svgEl: SVGSVGElement): void {
+  const { minLat, maxLat, minLon, maxLon } = CHART_BOUNDS;
+  const gG = grp('grid', svgEl);
+  const step = 5 / 60; // 5′ in decimal degrees
+
+  for (let lat = Math.ceil(minLat / step) * step; lat <= maxLat + 1e-9; lat += step) {
+    const { y } = latLonToSVG(lat, minLon);
+    el('line', { x1: 0, y1: y, x2: SVG_W, y2: y, stroke: '#6699bb', 'stroke-width': 0.4, opacity: 0.5 }, gG);
+    const deg = Math.floor(lat);
+    const min = Math.round((lat - deg) * 60);
+    txt(`${deg}°${min.toString().padStart(2, '0')}'N`, {
+      x: 4, y: y - 2, 'font-size': 9, fill: '#334455', 'font-family': 'Georgia, serif',
+    }, gG);
+  }
+
+  for (let lon = Math.ceil(minLon / step) * step; lon <= maxLon + 1e-9; lon += step) {
+    const { x } = latLonToSVG(minLat, lon);
+    el('line', { x1: x, y1: 0, x2: x, y2: SVG_H, stroke: '#6699bb', 'stroke-width': 0.4, opacity: 0.5 }, gG);
+    const abLon = Math.abs(lon);
+    const deg = Math.floor(abLon);
+    const min = Math.round((abLon - deg) * 60);
+    txt(`${deg.toString().padStart(3, '0')}°${min.toString().padStart(2, '0')}'W`, {
+      x: x + 2, y: SVG_H - 2,
+      'font-size': 9, fill: '#334455', 'font-family': 'Georgia, serif',
+      transform: `rotate(-90 ${x + 2} ${SVG_H - 2})`,
+    }, gG);
+  }
+
+  el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H, fill: 'none', stroke: '#1a3a5c', 'stroke-width': 3 }, gG);
+}
+
+function renderCompassRose(rose: CompassRose, svgEl: SVGSVGElement, variation: number): void {
+  const { x, y, r } = rose;
+  const gG = grp('compass-rose', svgEl);
+
+  el('circle', { cx: x, cy: y, r: r + 6, fill: 'rgba(255,255,255,0.75)', stroke: '#1a3a5c', 'stroke-width': 1 }, gG);
+
+  // True ring ticks
+  for (let deg = 0; deg < 360; deg++) {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    const isMajor = deg % 10 === 0;
+    const isMed = deg % 5 === 0;
+    const len = isMajor ? 12 : isMed ? 7 : 4;
+    el('line', {
+      x1: x + (r - 1) * Math.cos(rad),       y1: y + (r - 1) * Math.sin(rad),
+      x2: x + (r - 1 - len) * Math.cos(rad), y2: y + (r - 1 - len) * Math.sin(rad),
+      stroke: '#1a3a5c', 'stroke-width': isMajor ? 1.5 : 0.8,
+    }, gG);
+  }
+
+  for (let deg = 0; deg < 360; deg += 10) {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    const lr = r - 18;
+    txt(String(deg).padStart(3, '0'), {
+      x: x + lr * Math.cos(rad), y: y + lr * Math.sin(rad),
+      'text-anchor': 'middle', 'dominant-baseline': 'central',
+      'font-size': 8, fill: '#1a3a5c', 'font-family': 'Georgia, serif',
+      transform: `rotate(${deg} ${x + lr * Math.cos(rad)} ${y + lr * Math.sin(rad)})`,
+    }, gG);
+  }
+
+  // Magnetic ring
+  const magR = r * 0.72;
+  el('circle', { cx: x, cy: y, r: magR + 4, fill: 'none', stroke: '#884400', 'stroke-width': 1, 'stroke-dasharray': '4,2' }, gG);
+
+  for (let deg = 0; deg < 360; deg += 5) {
+    const magDeg = deg + variation;
+    const rad = ((magDeg - 90) * Math.PI) / 180;
+    const isMajor = deg % 10 === 0;
+    const len = isMajor ? 8 : 4;
+    el('line', {
+      x1: x + (magR + 1) * Math.cos(rad),       y1: y + (magR + 1) * Math.sin(rad),
+      x2: x + (magR + 1 + len) * Math.cos(rad), y2: y + (magR + 1 + len) * Math.sin(rad),
+      stroke: '#884400', 'stroke-width': isMajor ? 1.2 : 0.7,
+    }, gG);
+  }
+
+  for (let deg = 0; deg < 360; deg += 10) {
+    const magDeg = deg + variation;
+    const rad = ((magDeg - 90) * Math.PI) / 180;
+    const lr = magR - 6;
+    txt(String(deg).padStart(3, '0'), {
+      x: x + lr * Math.cos(rad), y: y + lr * Math.sin(rad),
+      'text-anchor': 'middle', 'dominant-baseline': 'central',
+      'font-size': 7, fill: '#884400', 'font-family': 'Georgia, serif',
+      transform: `rotate(${magDeg} ${x + lr * Math.cos(rad)} ${y + lr * Math.sin(rad)})`,
+    }, gG);
+  }
+
+  const cardinals: Array<[number, string]> = [[0, 'N'], [90, 'E'], [180, 'S'], [270, 'W']];
+  for (const [deg, label] of cardinals) {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    const lr = r + 12;
+    txt(label, {
+      x: x + lr * Math.cos(rad), y: y + lr * Math.sin(rad),
+      'text-anchor': 'middle', 'dominant-baseline': 'central',
+      'font-size': 13, fill: '#1a3a5c', 'font-weight': 'bold', 'font-family': 'Georgia, serif',
+    }, gG);
+  }
+
+  el('circle', { cx: x, cy: y, r: 4, fill: '#1a3a5c' }, gG);
+  txt(`Var ${variation}°W`, {
+    x, y: y + magR * 0.35,
+    'text-anchor': 'middle', 'font-size': 9, fill: '#884400', 'font-family': 'Georgia, serif',
+  }, gG);
+  txt('T', { x: x + r - 32, y: y - 4, 'font-size': 8, fill: '#1a3a5c', 'font-family': 'Georgia, serif' }, gG);
+  txt('M', { x: x + magR - 18, y: y - 4, 'font-size': 7, fill: '#884400', 'font-family': 'Georgia, serif' }, gG);
+}
+
+function renderScaleBar(svgEl: SVGSVGElement): void {
+  const gG = grp('scale-bar', svgEl);
+  // 1 minute of latitude = 1 NM
+  const { y: y0 } = latLonToSVG(52.25, -4.0);
+  const { y: y1 } = latLonToSVG(52.25 + 1 / 60, -4.0);
+  const pxPerNM = Math.abs(y1 - y0);
+  const bx = SVG_W * 0.04;
+  const by = SVG_H - 40;
+  const bw = pxPerNM * 5;
+
+  el('rect', { x: bx, y: by - 8, width: bw, height: 8, fill: '#1a3a5c' }, gG);
+  for (let i = 0; i < 5; i++) {
+    if (i % 2 === 1) {
+      el('rect', { x: bx + i * pxPerNM, y: by - 8, width: pxPerNM, height: 8, fill: '#fff' }, gG);
+    }
+  }
+  el('rect', { x: bx, y: by - 8, width: bw, height: 8, fill: 'none', stroke: '#1a3a5c', 'stroke-width': 1 }, gG);
+
+  for (let nm = 0; nm <= 5; nm++) {
+    const tx = bx + nm * pxPerNM;
+    el('line', { x1: tx, y1: by - 10, x2: tx, y2: by, stroke: '#1a3a5c', 'stroke-width': 1 }, gG);
+    txt(String(nm), { x: tx, y: by + 10, 'text-anchor': 'middle', 'font-size': 9, fill: '#1a3a5c', 'font-family': 'Georgia, serif' }, gG);
+  }
+  txt('Nautical Miles', {
+    x: bx + bw / 2, y: by + 20,
+    'text-anchor': 'middle', 'font-size': 9,
+    fill: '#1a3a5c', 'font-style': 'italic', 'font-family': 'Georgia, serif',
+  }, gG);
+}
+
+function renderTitleBlock(svgEl: SVGSVGElement, variation: number, seed: number): void {
+  const gG = grp('title-block', svgEl);
+  const bx = SVG_W - 320, by = SVG_H - 120;
+  el('rect', { x: bx, y: by, width: 310, height: 110, fill: 'rgba(255,255,250,0.85)', stroke: '#1a3a5c', 'stroke-width': 1.5 }, gG);
+
+  const lines: Array<[string, number, string, string]> = [
+    ['FICTIONAL TRAINING CHART', 14, '#1a3a5c', 'bold'],
+    [`Chart No. FTC-${(seed % 9999) + 1000}`, 10, '#1a3a5c', 'normal'],
+    ["Scale 1:50,000  Datum WGS84", 9, '#334455', 'normal'],
+    ["Lat 52°00'N – 52°30'N  Lon 004°00'W – 004°40'W", 8, '#334455', 'normal'],
+    [`Magnetic Variation: ${variation}°W (2025)`, 9, '#884400', 'normal'],
+    ['FOR TRAINING USE ONLY – NOT FOR NAVIGATION', 8, '#cc2222', 'bold'],
+    [`Seed: ${seed}`, 8, '#888', 'normal'],
+  ];
+
+  let ly = by + 16;
+  for (const [content, size, fill, weight] of lines) {
+    txt(content, { x: bx + 8, y: ly, 'font-size': size, fill, 'font-weight': weight, 'font-family': 'Georgia, serif' }, gG);
+    ly += size + 5;
+  }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+export function generateChart(seed: number): ChartData {
+  const rng = makeRNG(seed);
+  const noise = createNoise2D(seed);
+
+  const coastPts = buildCoastlinePoints(noise);
+  const depthFn  = buildDepthField(coastPts, noise);
+  const soundings = buildSoundings(depthFn, rng);
+  const contours  = buildContours(depthFn, [5, 10, 20]);
+  const shoals    = buildShoals(depthFn, rng);
+  const landmarks = placeLandmarks(coastPts, depthFn, rng);
+  const harbour   = buildHarbour(coastPts, rng);
+  const cardinalBuoys = buildCardinalBuoys(shoals);
+  const compassRose   = placeCompassRose(depthFn, rng);
+  const anchorages    = buildAnchorages(depthFn, rng);
+  const variation     = 2 + Math.floor(rng() * 4); // 2–5°W
+
+  return {
+    seed, variation, coastPts, depthFn,
+    soundings, contours, shoals, landmarks,
+    harbour, cardinalBuoys, compassRose, anchorages,
+  };
+}
+
+export function renderChartToSVG(svgEl: SVGSVGElement, data: ChartData): void {
+  renderChart(svgEl, data);
+}
