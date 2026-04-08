@@ -182,10 +182,10 @@ function drawScaleBar(c: CanvasRenderingContext2D, _screenW: number, screenH: nu
   c.save();
 
   c.fillStyle = 'rgba(255,255,255,0.85)';
-  c.fillRect(bx - 6, by - 18, barW + 12, 38);
+  c.fillRect(bx - 6, by - 18, barW + 12, 46);
   c.strokeStyle = '#1a3a5c';
   c.lineWidth = 0.8;
-  c.strokeRect(bx - 6, by - 18, barW + 12, 38);
+  c.strokeRect(bx - 6, by - 18, barW + 12, 46);
 
   for (let i = 0; i < maxNM; i++) {
     c.fillStyle = i % 2 === 0 ? '#1a3a5c' : '#ffffff';
@@ -210,7 +210,7 @@ function drawScaleBar(c: CanvasRenderingContext2D, _screenW: number, screenH: nu
   }
 
   c.font = 'italic 10px "Courier New", monospace';
-  c.fillText('Nautical Miles', bx + barW / 2, by + 24);
+  c.fillText('Nautical Miles', bx + barW / 2, by + 22);
 
   c.restore();
 }
