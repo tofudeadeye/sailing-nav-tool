@@ -1002,9 +1002,23 @@ function drawChannelBuoy(b: ChannelBuoy, parent: Element): void {
 
 function drawCardinalBuoy(b: CardinalBuoy, parent: Element): void {
   const { x, y, type, name } = b;
-  // Body: top half black, bottom half yellow (all cardinal buoys)
-  el('rect', { x: x - 5, y: y - 20, width: 10, height: 10, fill: '#000000' }, parent);
-  el('rect', { x: x - 5, y: y - 10, width: 10, height: 10, fill: '#ffcc00' }, parent);
+  const K = '#000000', Y = '#ffcc00';
+  // Body bands: north = black/yellow, south = yellow/black, east = black/yellow/black, west = yellow/black/yellow
+  if (type === 'north') {
+    el('rect', { x: x - 5, y: y - 20, width: 10, height: 10, fill: K }, parent);
+    el('rect', { x: x - 5, y: y - 10, width: 10, height: 10, fill: Y }, parent);
+  } else if (type === 'south') {
+    el('rect', { x: x - 5, y: y - 20, width: 10, height: 10, fill: Y }, parent);
+    el('rect', { x: x - 5, y: y - 10, width: 10, height: 10, fill: K }, parent);
+  } else if (type === 'east') {
+    el('rect', { x: x - 5, y: y - 20, width: 10, height: 7, fill: K }, parent);
+    el('rect', { x: x - 5, y: y - 13, width: 10, height: 6, fill: Y }, parent);
+    el('rect', { x: x - 5, y: y -  7, width: 10, height: 7, fill: K }, parent);
+  } else { // west
+    el('rect', { x: x - 5, y: y - 20, width: 10, height: 7, fill: Y }, parent);
+    el('rect', { x: x - 5, y: y - 13, width: 10, height: 6, fill: K }, parent);
+    el('rect', { x: x - 5, y: y -  7, width: 10, height: 7, fill: Y }, parent);
+  }
   el('line', { x1: x, y1: y, x2: x, y2: y + 14, stroke: '#333', 'stroke-width': 1.5 }, parent);
   // Topmarks differ per cardinal direction
   if (type === 'north') {

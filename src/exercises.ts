@@ -850,6 +850,9 @@ export function drawExerciseOverlays(
 ): void {
   ctx.save();
 
+  const MAGENTA = '#ff00cc';
+
+  // Generic circle marker (used for landmarks, hazards etc.)
   const mark = (svgX: number, svgY: number, style: string, label?: string): void => {
     const sc = svgToScreen(svgX, svgY);
     ctx.strokeStyle = style;
@@ -864,34 +867,57 @@ export function drawExerciseOverlays(
     }
   };
 
-  const cross = (svgX: number, svgY: number, style: string, label?: string): void => {
+  // Destination marker: ⊕ (circle with crosshair inside), bold magenta
+  const dest = (svgX: number, svgY: number, label?: string): void => {
     const sc = svgToScreen(svgX, svgY);
-    const s = 8;
-    ctx.strokeStyle = style;
+    const r = 9;
+    ctx.strokeStyle = MAGENTA;
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(sc.x - s, sc.y - s); ctx.lineTo(sc.x + s, sc.y + s);
-    ctx.moveTo(sc.x + s, sc.y - s); ctx.lineTo(sc.x - s, sc.y + s);
+    ctx.arc(sc.x, sc.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(sc.x - r, sc.y); ctx.lineTo(sc.x + r, sc.y);
+    ctx.moveTo(sc.x, sc.y - r); ctx.lineTo(sc.x, sc.y + r);
     ctx.stroke();
     if (label) {
-      ctx.fillStyle = style;
-      ctx.font = '11px Courier New';
-      ctx.fillText(label, sc.x + 10, sc.y - 5);
+      ctx.fillStyle = MAGENTA;
+      ctx.font = 'bold 11px Courier New';
+      ctx.fillText(label, sc.x + 13, sc.y - 5);
+    }
+  };
+
+  // Departure marker: circle with a dot in the center, bold magenta
+  const dep = (svgX: number, svgY: number, label?: string): void => {
+    const sc = svgToScreen(svgX, svgY);
+    ctx.strokeStyle = MAGENTA;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(sc.x, sc.y, 9, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = MAGENTA;
+    ctx.beginPath();
+    ctx.arc(sc.x, sc.y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    if (label) {
+      ctx.fillStyle = MAGENTA;
+      ctx.font = 'bold 11px Courier New';
+      ctx.fillText(label, sc.x + 13, sc.y - 5);
     }
   };
 
   switch (ex.id) {
     case 1: {
       const svg = latLonToSVG(ex.departure.lat, ex.departure.lon);
-      cross(svg.x, svg.y, '#22aaff',
+      dep(svg.x, svg.y,
         `Dep (${ex.courseDeg}°T ${ex.speedKn.toFixed(1)}kn ${ex.timeMin}min)`);
       break;
     }
     case 2: {
       const svgD  = latLonToSVG(ex.departure.lat, ex.departure.lon);
       const svgDt = latLonToSVG(ex.destination.lat, ex.destination.lon);
-      cross(svgD.x,  svgD.y,  '#22aaff', 'Dep');
-      mark(svgDt.x, svgDt.y, '#22aaff', 'Dest');
+      dep(svgD.x,  svgD.y,  'Dep');
+      dest(svgDt.x, svgDt.y, 'Dest');
       break;
     }
     case 3: {
@@ -904,11 +930,11 @@ export function drawExerciseOverlays(
     case 4: {
       const svgD  = latLonToSVG(ex.departure.lat, ex.departure.lon);
       const svgDt = latLonToSVG(ex.destination.lat, ex.destination.lon);
-      cross(svgD.x, svgD.y,  '#22aaff', 'Dep');
-      mark(svgDt.x, svgDt.y, '#22aaff', 'Dest');
+      dep(svgD.x,  svgD.y,  'Dep');
+      dest(svgDt.x, svgDt.y, 'Dest');
       const sc1 = svgToScreen(svgD.x, svgD.y);
       const sc2 = svgToScreen(svgDt.x, svgDt.y);
-      ctx.strokeStyle = '#22aaff';
+      ctx.strokeStyle = MAGENTA;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 3]);
       ctx.beginPath(); ctx.moveTo(sc1.x, sc1.y); ctx.lineTo(sc2.x, sc2.y); ctx.stroke();
@@ -928,7 +954,7 @@ export function drawExerciseOverlays(
     case 6: {
       const svgD  = latLonToSVG(ex.departure.lat, ex.departure.lon);
       const svgFix = latLonToSVG(ex.fixPos.lat, ex.fixPos.lon);
-      cross(svgD.x,  svgD.y,  '#22aaff', 'Dep');
+      dep(svgD.x,  svgD.y,  'Dep');
       mark(svgFix.x, svgFix.y, '#22aaff', 'Fix');
       break;
     }
