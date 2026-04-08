@@ -173,8 +173,14 @@ function drawScaleBar(c: CanvasRenderingContext2D, _screenW: number, screenH: nu
   const nmInSVGpx = SVG_H / ((CHART_BOUNDS.maxLat - CHART_BOUNDS.minLat) * 60);
   const nmInScreenPx = nmInSVGpx * transform.scale;
 
-  const maxNM = 5;
-  const barW = nmInScreenPx * maxNM;
+  // Bar is always exactly this wide with exactly 5 segments — only labels change with zoom.
+  const NUM_SEGMENTS = 5;
+  const barW = 450;
+  const segW = barW / NUM_SEGMENTS;
+
+  // Zoom snaps to exact levels so totalNM/NUM_SEGMENTS is always a whole number.
+  const totalNM = barW / nmInScreenPx;
+  const nmStep = Math.round(totalNM / NUM_SEGMENTS);
 
   const bx = 20;
   const by = screenH - 36;
@@ -187,9 +193,9 @@ function drawScaleBar(c: CanvasRenderingContext2D, _screenW: number, screenH: nu
   c.lineWidth = 0.8;
   c.strokeRect(bx - 6, by - 18, barW + 12, 46);
 
-  for (let i = 0; i < maxNM; i++) {
+  for (let i = 0; i < NUM_SEGMENTS; i++) {
     c.fillStyle = i % 2 === 0 ? '#1a3a5c' : '#ffffff';
-    c.fillRect(bx + i * nmInScreenPx, by - 8, nmInScreenPx, 8);
+    c.fillRect(bx + i * segW, by - 8, segW, 8);
   }
   c.strokeStyle = '#1a3a5c';
   c.lineWidth = 1;
@@ -198,15 +204,17 @@ function drawScaleBar(c: CanvasRenderingContext2D, _screenW: number, screenH: nu
   c.fillStyle = '#1a3a5c';
   c.font = '10px "Courier New", monospace';
   c.textAlign = 'center';
-  for (let nm = 0; nm <= maxNM; nm++) {
-    const tx = bx + nm * nmInScreenPx;
+  for (let i = 0; i <= NUM_SEGMENTS; i++) {
+    const tx = bx + i * segW;
+    const val = nmStep * i;
+    const label = val === 0 ? '0' : val < 1 ? val.toFixed(2) : String(Math.round(val * 100) / 100);
     c.beginPath();
     c.moveTo(tx, by - 10);
     c.lineTo(tx, by);
     c.strokeStyle = '#1a3a5c';
     c.lineWidth = 1;
     c.stroke();
-    c.fillText(String(nm), tx, by + 12);
+    c.fillText(label, tx, by + 12);
   }
 
   c.font = 'italic 10px "Courier New", monospace';

@@ -155,8 +155,28 @@ chartWrap.addEventListener('wheel', (e: WheelEvent) => {
   const rect  = chartWrap.getBoundingClientRect();
   const mx    = e.clientX - rect.left;
   const my    = e.clientY - rect.top;
-  const delta = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-  const ns    = Math.max(0.3, Math.min(8, transform.scale * delta));
+  const zoomIn  = e.deltaY < 0;
+
+  // Each entry = scale where the bar shows exactly N NM per segment (total = N*5 NM).
+  // scale = 450 / (5 * N * 20) = 4.5 / N. Ascending order.
+  const snapScales = [
+    0.45,       // 10 NM/seg → 0–50
+    0.5,        //  9 NM/seg → 0–45
+    0.5625,     //  8 NM/seg → 0–40
+    0.643,      //  7 NM/seg → 0–35
+    0.75,       //  6 NM/seg → 0–30
+    0.9,        //  5 NM/seg → 0–25
+    1.125,      //  4 NM/seg → 0–20
+    1.5,        //  3 NM/seg → 0–15
+    2.25,       //  2 NM/seg → 0–10
+    4.5,        //  1 NM/seg → 0–5
+  ];
+
+  // Pick the next snap level strictly in the direction of travel.
+  const ns = zoomIn
+    ? snapScales.find(s => s > transform.scale) ?? transform.scale
+    : [...snapScales].reverse().find(s => s < transform.scale) ?? transform.scale;
+
   transform.offsetX = mx - (mx - transform.offsetX) * (ns / transform.scale);
   transform.offsetY = my - (my - transform.offsetY) * (ns / transform.scale);
   transform.scale   = ns;

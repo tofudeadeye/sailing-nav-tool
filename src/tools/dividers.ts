@@ -4,33 +4,62 @@ import { state, wb } from './types.ts';
 const HANDLE_R = 10;
 
 // Snap threshold in screen pixels
-const SNAP_PX = 8;
+const SNAP_PX = 12;
 
 /**
- * Snap SVG coords to the nearest 1-arc-minute lat or lon grid line
- * if within SNAP_PX screen pixels of one.
+ * Snap SVG coords to:
+ *  1. The nearest 1-arc-minute lat/lon tick on the chart border
+ *  2. The centre of any chart marker (landmark, buoy, anchorage, harbour entrance)
  */
 function snapToGrid(svgX: number, svgY: number): { x: number; y: number } {
   const { minLat, maxLat, minLon, maxLon } = CHART_BOUNDS;
   const s = transform.scale;
 
-  // Snap Y to nearest 1' latitude line (60 SVG px spacing)
+  // Collect candidate snap points
+  const candidates: Array<{ x: number; y: number }> = [];
+
+  // 1. Border ticks: lat-minute tick marks on left (x=0) and right (x=SVG_W) edges.
+  //    Only snap when the cursor is near those borders.
   const pxPerLatMin = SVG_H / ((maxLat - minLat) * 60);
-  const nearestLatMin = Math.round(svgY / pxPerLatMin);
-  const snappedY = nearestLatMin * pxPerLatMin;
-  if (Math.abs(snappedY - svgY) * s < SNAP_PX) {
-    svgY = snappedY;
+  const borderThreshSVG = SNAP_PX / s;
+  if (svgX < borderThreshSVG || svgX > SVG_W - borderThreshSVG) {
+    const nearestLatMin = Math.round(svgY / pxPerLatMin);
+    for (let dm = -1; dm <= 1; dm++) {
+      const tickY = (nearestLatMin + dm) * pxPerLatMin;
+      candidates.push({ x: svgX < SVG_W / 2 ? 0 : SVG_W, y: tickY });
+    }
   }
 
-  // Snap X to nearest 1' longitude line
+  // 2. Border ticks: lon-minute tick marks on top (y=0) and bottom (y=SVG_H) edges.
+  //    Only snap when the cursor is near those borders.
   const pxPerLonMin = SVG_W / ((maxLon - minLon) * 60);
-  const nearestLonMin = Math.round(svgX / pxPerLonMin);
-  const snappedX = nearestLonMin * pxPerLonMin;
-  if (Math.abs(snappedX - svgX) * s < SNAP_PX) {
-    svgX = snappedX;
+  if (svgY < borderThreshSVG || svgY > SVG_H - borderThreshSVG) {
+    const nearestLonMin = Math.round(svgX / pxPerLonMin);
+    for (let dm = -1; dm <= 1; dm++) {
+      const tickX = (nearestLonMin + dm) * pxPerLonMin;
+      candidates.push({ x: tickX, y: svgY < SVG_H / 2 ? 0 : SVG_H });
+    }
   }
 
-  return { x: svgX, y: svgY };
+  // 3. Marker centres from chart data
+  const cd = state.chartData;
+  if (cd) {
+    for (const lm of cd.landmarks)       candidates.push({ x: lm.x, y: lm.y });
+    for (const b  of cd.harbour.buoys)   candidates.push({ x: b.x,  y: b.y  });
+    for (const b  of cd.cardinalBuoys)   candidates.push({ x: b.x,  y: b.y  });
+    for (const a  of cd.anchorages)      candidates.push({ x: a.x,  y: a.y  });
+    candidates.push({ x: cd.harbour.entrance.x, y: cd.harbour.entrance.y });
+  }
+
+  // Pick closest candidate within threshold
+  let bestDist = SNAP_PX / s; // convert screen threshold to SVG units
+  let best = { x: svgX, y: svgY };
+  for (const c of candidates) {
+    const d = Math.hypot(c.x - svgX, c.y - svgY);
+    if (d < bestDist) { bestDist = d; best = c; }
+  }
+
+  return best;
 }
 
 export function spawnDividers(svgX: number, svgY: number): void {
