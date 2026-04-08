@@ -349,10 +349,10 @@ function onPencilDown(e: PointerEvent): boolean {
       type, selected: false,
     };
     state.lines.push(line);
-    wb.setCourse?.(
-      svgLineBearing(line.svgX1, line.svgY1, line.svgX2, line.svgY2),
-      chartData?.variation ?? 0,
-    );
+    const sv = chartData
+      ? (chartData.variationDir === 'W' ? chartData.variation : -chartData.variation)
+      : 0;
+    wb.setCourse?.(svgLineBearing(line.svgX1, line.svgY1, line.svgX2, line.svgY2), sv);
     pencilStart = null;
     pencilPreviewEnd = null;
   }
@@ -438,9 +438,11 @@ function onCompassClick(e: PointerEvent): void {
     { ...nearest, lat: lmLat, lon: lmLon },
     vessel.lat, vessel.lon,
     chartData.variation,
+    chartData.variationDir,
   );
 
-  wb.setBearing?.(result.trueBear, chartData.variation);
+  const signedVar = chartData.variationDir === 'W' ? chartData.variation : -chartData.variation;
+  wb.setBearing?.(result.trueBear, signedVar);
   showToast(`${nearest.name}: ${fmt3(result.magBearing)}°M (${fmt3(result.trueBear)}°T)`);
 }
 
@@ -478,6 +480,9 @@ function showToast(msg: string): void {
 // ── Tool buttons ──────────────────────────────────────────────────────────────
 
 function setActiveTool(tool: ToolName): void {
+  if (state.activeTool === 'parallel-rules' && tool !== 'parallel-rules') {
+    state.parallelRules = null;
+  }
   state.activeTool = tool;
   state.eraseMode  = false;
   document.querySelectorAll<HTMLButtonElement>('.tool-btn[data-tool]').forEach(btn => {

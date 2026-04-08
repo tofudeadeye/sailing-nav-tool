@@ -7,9 +7,11 @@ const PCP_ROSE_R = 100;
 const PCP_EDGE_EXT = 60;
 const PCP_GRID_SPACING = 16;
 
-function bearingLabel(bearing: number, variation: number): string {
+function bearingLabel(bearing: number, variation: number, variationDir: 'E' | 'W'): string {
   const t = Math.round(((bearing % 360) + 360) % 360);
-  const m = Math.round((((bearing + variation) % 360) + 360) % 360);
+  // West is Best (+): add variation. East is Least (-): subtract variation.
+  const signedVar = variationDir === 'W' ? variation : -variation;
+  const m = Math.round((((bearing + signedVar) % 360) + 360) % 360);
   return `${String(t).padStart(3, '0')}°T (${String(m).padStart(3, '0')}°M)`;
 }
 
@@ -144,8 +146,9 @@ export function drawPlotterOverlay(c: CanvasRenderingContext2D): void {
 
   // Bearing readout label
   const bearing   = ((p.angleDeg - p.roseAngleDeg) + 90 + 360) % 360;
-  const variation = state.chartData?.variation ?? 0;
-  const label     = `Plotter: ${bearingLabel(bearing, variation)}`;
+  const variation    = state.chartData?.variation ?? 0;
+  const variationDir = state.chartData?.variationDir ?? 'W';
+  const label        = `Plotter: ${bearingLabel(bearing, variation, variationDir)}`;
 
   const topEdgeX = centre.x - Math.sin((p.angleDeg * Math.PI) / 180) * hh;
   const topEdgeY = centre.y - Math.cos((p.angleDeg * Math.PI) / 180) * hh;

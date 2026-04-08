@@ -354,7 +354,8 @@ export function generateExercise3(cd: ChartData): Ex3CrossBearing {
     const { lat: lmLat, lon: lmLon } = svgToLatLon(lm.x, lm.y);
     const tb   = trueBearing(vessel.lat, vessel.lon, lmLat, lmLon);
     const err  = gaussianRandom() * 2;
-    const mag  = Math.round(((tb + cd.variation + err) % 360 + 360) % 360 * 10) / 10;
+    const signedVar = cd.variationDir === 'W' ? cd.variation : -cd.variation;
+    const mag  = Math.round(((tb + signedVar + err) % 360 + 360) % 360 * 10) / 10;
     return { lm, lmLat, lmLon, trueBear: tb, magBear: mag };
   });
 
@@ -463,6 +464,13 @@ export function generateExercise4(cd: ChartData): Ex4DistanceETA {
       <br />
       <p><b>Step 4 — Enter in workbook and submit:</b><br>
       Record the measured distance (NM) and ETA (HH:MM), then press Submit.</p>
+      <br />
+      <p><b>Working solution:</b></p>
+      <ul>
+        <li>Distance: <b>${trueDist.toFixed(2)} NM</b></li>
+        <li>Time underway: <b>${trueDist.toFixed(2)} ÷ ${speedKn.toFixed(1)} = ${(timeMin / 60).toFixed(3)} h = ${Math.floor(timeMin)}m ${Math.round((timeMin % 1) * 60)}s ≈ <b>${Math.round(timeMin)} min</b></li>
+        <li>ETA: ${depTime} + ${Math.floor(timeMin)}m = <b>${eta}</b></li>
+      </ul>
       <br />
       <p><b>Common errors:</b></p>
       <ul>
@@ -723,19 +731,39 @@ function scoreEx3(ex: Ex3CrossBearing, lines: DrawnLine[]): ScoreResult {
   let html = `<p>Vessel: <b>${formatLatLon(ex.vessel.lat, ex.vessel.lon)}</b></p>`;
   let allPass = true;
 
-  for (let i = 0; i < posLines.length; i++) {
-    const line     = posLines[i]!;
-    const bearing  = svgLineBearing(line.svgX1, line.svgY1, line.svgX2, line.svgY2);
-    const expected = ex.bearings[i]?.trueBear ?? 0;
-    const recip    = (expected + 180) % 360;
-    const err      = Math.min(
-      Math.abs(angleDiff(bearing, recip)),
-      Math.abs(angleDiff(bearing, expected)),
-    );
-    const pass = err <= 4;
+  // For each expected bearing, find the best-matching drawn line (by minimum angular error)
+  // This handles the case where lines are drawn in a different order than the landmarks
+  const usedLineIdx = new Set<number>();
+
+  for (let i = 0; i < ex.bearings.length; i++) {
+    const trueBear = ex.bearings[i]?.trueBear ?? 0;
+    const recip    = (trueBear + 180) % 360;
+
+    let bestErr = Infinity;
+    let bestIdx = -1;
+    for (let j = 0; j < posLines.length; j++) {
+      if (usedLineIdx.has(j)) continue;
+      const line    = posLines[j]!;
+      const bearing = svgLineBearing(line.svgX1, line.svgY1, line.svgX2, line.svgY2);
+      const err     = Math.min(
+        Math.abs(angleDiff(bearing, recip)),
+        Math.abs(angleDiff(bearing, trueBear)),
+      );
+      if (err < bestErr) { bestErr = err; bestIdx = j; }
+    }
+
+    if (bestIdx === -1) {
+      html += `<p>Line for ${ex.bearings[i]?.lm?.name ?? '?'}: <span class="score-bad">not drawn</span></p>`;
+      allPass = false;
+      continue;
+    }
+
+    usedLineIdx.add(bestIdx);
+    const drawnBearing = svgLineBearing(posLines[bestIdx]!.svgX1, posLines[bestIdx]!.svgY1, posLines[bestIdx]!.svgX2, posLines[bestIdx]!.svgY2);
+    const pass = bestErr <= 5;
     if (!pass) allPass = false;
-    html += `<p>Line ${i + 1} (${ex.bearings[i]?.lm?.name ?? '?'}): expected ${recip.toFixed(0)}°T, you drew ${bearing.toFixed(0)}°T
-      <span class="${pass ? 'score-good' : 'score-bad'}">(error ${err.toFixed(1)}°)</span></p>`;
+    html += `<p>${ex.bearings[i]?.lm?.name ?? '?'}: reciprocal ${recip.toFixed(0)}°T, you drew ${drawnBearing.toFixed(0)}°T
+      <span class="${pass ? 'score-good' : 'score-bad'}">(error ${bestErr.toFixed(1)}°)</span></p>`;
   }
   return { pass: allPass, html };
 }

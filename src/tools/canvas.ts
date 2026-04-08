@@ -48,8 +48,8 @@ function drawBorderTicks(c: CanvasRenderingContext2D, screenW: number, screenH: 
   const chartW = topRight.x - topLeft.x;   // SVG_W * s
   const chartH = bottomLeft.y - topLeft.y; // SVG_H * s
 
-const TICK_LONG  = 8;
-  const TICK_SHORT = 4;
+  const TICK_LONG  = 16;
+  const TICK_SHORT = 8;
   const BG = 'rgba(220,232,240,0.97)';
   const FG = '#1a3a5c';
   const fontSize = 10;
