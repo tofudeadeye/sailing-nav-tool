@@ -484,3 +484,20 @@ html, body, #app {
   padding: 1px 5px;
   white-space: nowrap;
 }
+
+/* ── Compass rose: magnetic variation overlay text ───────────────────────────
+   Matches the style of the outlined SVG path text in compass-inner.svg        */
+.compass-var-text {
+  fill: #e50083;
+  fill-opacity: 1;
+  stroke: none;
+  font-size: 18px;
+  font-family: 'DejaVu Sans', sans-serif;
+  font-weight: normal;
+  font-style: normal;
+  font-variant: normal;
+  font-stretch: semi-condensed;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  writing-mode: lr;
+}

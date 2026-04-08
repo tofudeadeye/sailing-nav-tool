@@ -1,5 +1,7 @@
 import { createNoise2D, type Noise2D } from './noise.ts';
-import { SVG_W, SVG_H, latLonToSVG, CHART_BOUNDS, svgToLatLon } from './coords.ts';
+import { SVG_W, SVG_H, latLonToSVG, CHART_BOUNDS } from './coords.ts';
+import compassOuterSvg from '../compass-outer.svg?raw';
+import compassInnerSvg from '../compass-inner.svg?raw';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -95,7 +97,7 @@ export interface ChartData {
   variation: number;     // absolute value in degrees
   variationDir: 'E' | 'W'; // East or West
   coastPts: Array<{ x: number; y: number }>;
-  islands: Array<Array<{ x: number; y: number }>>;
+  islands: Array<{ poly: Array<{ x: number; y: number }>; name: string }>;
   cfg: CoastConfig;
   depthFn: DepthFn;
   soundings: Sounding[];
@@ -163,7 +165,7 @@ function buildDepthField(
   coastPts: Array<{ x: number; y: number }>,
   noise: Noise2D,
   cfg: CoastConfig,
-  islands: Array<Array<{ x: number; y: number }>>,
+  islands: Array<{ poly: Array<{ x: number; y: number }>; name: string }>,
 ): DepthFn {
   const maxIdx = coastPts.length - 3;
 
@@ -183,11 +185,8 @@ function buildDepthField(
     }
   }
 
-  // Pre-compute island polygons as point arrays for point-in-polygon tests
-  const islandPolys = islands;
-
   const pointInIsland = (px: number, py: number): boolean => {
-    for (const poly of islandPolys) {
+    for (const { poly } of islands) {
       let inside = false;
       for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
         const xi = poly[i]!.x, yi = poly[i]!.y;
@@ -226,13 +225,27 @@ function buildDepthField(
 
 // ── Islands ───────────────────────────────────────────────────────────────────
 
+const ISLAND_NAME_PARTS = {
+  prefix: ['North', 'South', 'East', 'West', 'Great', 'Little', 'Black', 'White', 'Red', 'Grey', 'Low', 'High'],
+  root:   ['Heron', 'Gannet', 'Kelp', 'Tern', 'Gull', 'Skerry', 'Anvil', 'Seal', 'Wreck', 'Cairn', 'Fern', 'Crow'],
+  suffix: ['Island', 'Isle', 'Rock', 'Islet', 'Bank', 'Cay', 'Key'],
+};
+
+function islandName(rng: () => number): string {
+  const usePrefix = rng() < 0.45;
+  const prefix = usePrefix ? ISLAND_NAME_PARTS.prefix[Math.floor(rng() * ISLAND_NAME_PARTS.prefix.length)]! + ' ' : '';
+  const root = ISLAND_NAME_PARTS.root[Math.floor(rng() * ISLAND_NAME_PARTS.root.length)]!;
+  const suffix = ' ' + ISLAND_NAME_PARTS.suffix[Math.floor(rng() * ISLAND_NAME_PARTS.suffix.length)]!;
+  return prefix + root + suffix;
+}
+
 function buildIslands(
   noise: Noise2D,
   rng: () => number,
   cfg: CoastConfig,
   coastPts: Array<{ x: number; y: number }>,
-): Array<Array<{ x: number; y: number }>> {
-  const islands: Array<Array<{ x: number; y: number }>> = [];
+): Array<{ poly: Array<{ x: number; y: number }>; name: string }> {
+  const islands: Array<{ poly: Array<{ x: number; y: number }>; name: string }> = [];
   const count = 2 + Math.floor(rng() * 3); // 2–4 islands
 
   // Build a fast coast lookup to check if a point is in water
@@ -274,7 +287,7 @@ function buildIslands(
     if (!isWater(cx, cy)) continue;
 
     // Must be far enough from existing islands
-    if (islands.some(isl => {
+    if (islands.some(({ poly: isl }) => {
       const ic = isl[Math.floor(isl.length / 2)]!;
       return Math.hypot(ic.x - cx, ic.y - cy) < 280;
     })) continue;
@@ -308,7 +321,7 @@ function buildIslands(
       poly.push({ x: px, y: py });
     }
 
-    if (valid && poly.length === SIDES) islands.push(poly);
+    if (valid && poly.length === SIDES) islands.push({ poly, name: islandName(rng) });
   }
 
   return islands;
@@ -316,14 +329,36 @@ function buildIslands(
 
 // ── Soundings ─────────────────────────────────────────────────────────────────
 
-function buildSoundings(depthFn: DepthFn, rng: () => number): Sounding[] {
+function buildSoundings(
+  depthFn: DepthFn,
+  rng: () => number,
+  contours: Record<number, ContourSegment[]>,
+): Sounding[] {
+  // Flatten all contour segment endpoints for proximity checks
+  const contourPts: Array<{ x: number; y: number }> = [];
+  for (const segs of Object.values(contours)) {
+    for (const seg of segs) {
+      contourPts.push(seg[0], seg[1]);
+    }
+  }
+
+  const NEAR_CONTOUR = 120; // px — soundings must be within this distance of a contour
+
+  const isNearContour = (x: number, y: number): boolean => {
+    for (const p of contourPts) {
+      if (Math.hypot(p.x - x, p.y - y) < NEAR_CONTOUR) return true;
+    }
+    return false;
+  };
+
   const soundings: Sounding[] = [];
   for (let attempt = 0; attempt < 600; attempt++) {
     const x = rng() * SVG_W;
     const y = rng() * SVG_H;
     const d = depthFn(x, y);
     if (d < 2) continue;
-    if (x < 30 || x > SVG_W - 30 || y < 30 || y > SVG_H - 30) continue;
+    if (x < 100 || x > SVG_W - 100 || y < 100 || y > SVG_H - 100) continue;
+    if (!isNearContour(x, y) && rng() > 0.15) continue;
     soundings.push({ x, y, depth: Math.round(d) });
   }
   return soundings;
@@ -387,8 +422,8 @@ function buildContours(
 function buildShoals(depthFn: DepthFn, rng: () => number): Shoal[] {
   const shoals: Shoal[] = [];
   for (let attempt = 0; attempt < 400 && shoals.length < 6; attempt++) {
-    const x = rng() * SVG_W;
-    const y = rng() * SVG_H;
+    const x = 100 + rng() * (SVG_W - 200);
+    const y = 100 + rng() * (SVG_H - 200);
     const d = depthFn(x, y);
     if (d < 3 || d > 15) continue;
     shoals.push({ x, y, r: 8 + rng() * 20 });
@@ -473,12 +508,49 @@ function placeLandmarks(
   depthFn: DepthFn,
   rng: () => number,
   cfg: CoastConfig,
+  islands: Array<{ poly: Array<{ x: number; y: number }>; name: string }>,
 ): Landmark[] {
   const landmarks: Landmark[] = [];
 
+  // Lighthouses: 2–4 total, placed on islands first then coast
+  const lighthouseTarget = 2 + Math.floor(rng() * 3); // 2, 3, or 4
+  let lighthousesPlaced = 0;
+
+  for (const { poly } of islands) {
+    if (lighthousesPlaced >= lighthouseTarget) break;
+    if (rng() > 0.5) continue;
+    const cx = poly.reduce((s, p) => s + p.x, 0) / poly.length;
+    const cy = poly.reduce((s, p) => s + p.y, 0) / poly.length;
+    if (landmarks.some(l => Math.hypot(l.x - cx, l.y - cy) < 90)) continue;
+    const sectors = genLightSectors(cx, cy, depthFn, rng);
+    landmarks.push({ type: 'lighthouse', x: cx, y: cy, name: landmarkName('lighthouse', rng), sectors });
+    lighthousesPlaced++;
+  }
+
+  // Fill remaining lighthouses from coast
+  for (let attempt = 0; attempt < 600 && lighthousesPlaced < lighthouseTarget; attempt++) {
+    const ci = Math.floor(rng() * (coastPts.length - 3));
+    const cp = coastPts[ci]!;
+    let x: number, y: number;
+    if (cfg.axis === 'vertical') {
+      const sign = cfg.waterSide === 'left' ? 1 : -1;
+      x = cp.x + sign * (15 + rng() * 160);
+      y = cp.y + (rng() - 0.5) * 80;
+    } else {
+      x = cp.x + (rng() - 0.5) * 80;
+      const sign = cfg.waterSide === 'top' ? 1 : -1;
+      y = cp.y + sign * (15 + rng() * 160);
+    }
+    if (x < 100 || x > SVG_W - 100 || y < 100 || y > SVG_H - 100) continue;
+    if (depthFn(x, y) > 0) continue;
+    if (landmarks.some(l => Math.hypot(l.x - x, l.y - y) < 90)) continue;
+    const sectors = genLightSectors(x, y, depthFn, rng);
+    landmarks.push({ type: 'lighthouse', x, y, name: landmarkName('lighthouse', rng), sectors });
+    lighthousesPlaced++;
+  }
+
   // Land-based types: place near coastline on the land side
   const landTypes: { type: LandmarkType; count: number }[] = [
-    { type: 'lighthouse', count: 5 },
     { type: 'church',     count: 6 },
     { type: 'mast',       count: 4 },
     { type: 'tower',      count: 4 },
@@ -499,7 +571,7 @@ function placeLandmarks(
         const sign = cfg.waterSide === 'top' ? 1 : -1;
         y = cp.y + sign * (15 + rng() * 160);
       }
-      if (x < 0 || x > SVG_W || y < 0 || y > SVG_H) continue;
+      if (x < 100 || x > SVG_W - 100 || y < 100 || y > SVG_H - 100) continue;
       if (depthFn(x, y) > 0) continue; // must be on land
       if (landmarks.some(l => Math.hypot(l.x - x, l.y - y) < 90)) continue;
       const sectors = type === 'lighthouse' ? genLightSectors(x, y, depthFn, rng) : undefined;
@@ -517,8 +589,8 @@ function placeLandmarks(
   for (const { type, count, minD, maxD } of waterTypes) {
     let placed = 0;
     for (let attempt = 0; attempt < 800 && placed < count; attempt++) {
-      const x = rng() * SVG_W;
-      const y = rng() * SVG_H;
+      const x = 100 + rng() * (SVG_W - 200);
+      const y = 100 + rng() * (SVG_H - 200);
       const d = depthFn(x, y);
       if (d < minD || d > maxD) continue;
       if (landmarks.some(l => Math.hypot(l.x - x, l.y - y) < 80)) continue;
@@ -533,13 +605,13 @@ function placeLandmarks(
 function landmarkName(type: LandmarkType, rng: () => number): string {
   const names: Record<LandmarkType, string[]> = {
     lighthouse: ['Pt. Moran Lt', 'Breakwater Lt', 'Haven Lt', 'Old Head Lt', 'Black Rock Lt',
-                 'Gull Point Lt', 'Tern Rock Lt', 'South Head Lt', 'Carrig Lt', 'Dunmore Lt'],
+                 'Gull Point Lt', 'Tern Rock Lt', 'South Head Lt', 'Lord Howe Lt', 'Dunmore Lt'],
     church:     ["St. Brendan's", 'All Saints', "St. Michael's", 'Chapel Hill', 'Old Church',
                  "St. David's", "St. Ciaran's", 'Holy Trinity', 'Abbey Ruins', "St. Ita's"],
     mast:       ['Radio Mast', 'TV Mast', 'Signal Mast', 'Comm. Tower', 'Coast Gd. Mast', 'Relay Mast'],
     tower:      ['Water Twr', 'Mill Tower', 'Old Tower', 'Barrow Twr', 'Martello Twr', 'Watch Twr'],
     wreck:      ['Wk (2003)', 'Wk (1944)', 'Wk (1917)', 'Wk (1982)', 'Wk (1861)'],
-    rock:       ['Carreg Ddu', 'Black Rock', 'Gull Rock', 'Seal Rock', 'Badger Stone', 'The Anvil'],
+    rock:       ["Mermaid's Stone", 'Black Rock', 'Gull Rock', 'Seal Rock', 'Badger Stone', 'The Anvil'],
   };
   const arr = names[type];
   return arr[Math.floor(rng() * arr.length)]!;
@@ -596,7 +668,7 @@ function buildHarbour(
     }
   }
 
-  const names = ['Port Carrig', 'Havenmouth', 'Dunmore Hbr', 'Cwm Harbour'] as const;
+  const names = ['Port Carrig', 'Havenmouth', 'Dunmore Hbr', 'Lazy Harbour'] as const;
   return {
     entrance, portPier, stbdPier, portInner, stbdInner, buoys,
     name: names[Math.floor(rng() * names.length)]!,
@@ -625,15 +697,77 @@ function buildCardinalBuoys(shoals: Shoal[]): CardinalBuoy[] {
 
 // ── Compass rose placement ────────────────────────────────────────────────────
 
-function placeCompassRose(depthFn: DepthFn, rng: () => number): CompassRose {
-  for (let attempt = 0; attempt < 500; attempt++) {
-    const x = SVG_W * (0.05 + rng() * 0.9);
-    const y = SVG_H * (0.05 + rng() * 0.9);
-    if (depthFn(x, y) < 20) continue;
-    if (x < 150 || y < 150 || x > SVG_W - 150 || y > SVG_H - 150) continue;
-    return { x, y, r: 90 };
+type Poly = Array<{ x: number; y: number }>;
+
+/** True if circle (cx,cy,r) overlaps polygon — checks vertex containment and edge intersections. */
+function circleIntersectsPoly(cx: number, cy: number, r: number, poly: Poly): boolean {
+  const r2 = r * r;
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i]!;
+    const b = poly[(i + 1) % n]!;
+    // Vertex inside circle
+    if ((a.x - cx) ** 2 + (a.y - cy) ** 2 < r2) return true;
+    // Closest point on edge segment to circle centre
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) continue;
+    const t = Math.max(0, Math.min(1, ((cx - a.x) * dx + (cy - a.y) * dy) / lenSq));
+    const nearX = a.x + t * dx, nearY = a.y + t * dy;
+    if ((nearX - cx) ** 2 + (nearY - cy) ** 2 < r2) return true;
   }
-  return { x: SVG_W * 0.18, y: SVG_H * 0.25, r: 90 };
+  // Centre inside polygon (ray-cast)
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = poly[i]!.x, yi = poly[i]!.y;
+    const xj = poly[j]!.x, yj = poly[j]!.y;
+    if ((yi > cy) !== (yj > cy) && cx < ((xj - xi) * (cy - yi)) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
+function placeCompassRose(
+  depthFn: DepthFn,
+  rng: () => number,
+  islands: Array<{ poly: Poly }>,
+): CompassRose {
+  const ROSE_R = 270;
+  const MARGIN = ROSE_R;
+  const MIN_DEPTH = 35;
+  const N_RING = 24;
+
+  const isValid = (x: number, y: number): boolean => {
+    if (x < MARGIN || x > SVG_W - MARGIN || y < MARGIN || y > SVG_H - MARGIN) return false;
+    if (depthFn(x, y) < MIN_DEPTH) return false;
+    // Perimeter depth check
+    for (let i = 0; i < N_RING; i++) {
+      const angle = (i / N_RING) * Math.PI * 2;
+      if (depthFn(x + ROSE_R * Math.cos(angle), y + ROSE_R * Math.sin(angle)) < 5) return false;
+    }
+    // Exact circle-vs-polygon collision for every island
+    for (const { poly } of islands) {
+      if (circleIntersectsPoly(x, y, ROSE_R, poly)) return false;
+    }
+    return true;
+  };
+
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const x = MARGIN + rng() * (SVG_W - MARGIN * 2);
+    const y = MARGIN + rng() * (SVG_H - MARGIN * 2);
+    if (isValid(x, y)) return { x, y, r: 90 };
+  }
+  // Fallback: grid-scan for deepest valid position
+  let bestX = SVG_W * 0.25, bestY = SVG_H * 0.25, bestDepth = -1;
+  for (let gx = MARGIN; gx <= SVG_W - MARGIN; gx += 60) {
+    for (let gy = MARGIN; gy <= SVG_H - MARGIN; gy += 60) {
+      const d = depthFn(gx, gy);
+      if (d > bestDepth && isValid(gx, gy)) {
+        bestDepth = d; bestX = gx; bestY = gy;
+      }
+    }
+  }
+  return { x: bestX, y: bestY, r: 90 };
 }
 
 // ── Anchorages ────────────────────────────────────────────────────────────────
@@ -643,8 +777,8 @@ function buildAnchorages(depthFn: DepthFn, rng: () => number): Anchorage[] {
   const names = ['Gull Roads', 'Blind Cove', 'The Haven', 'East Road',
                  'West Anchorage', 'Seal Bay', 'Long Roads', 'North Cove'] as const;
   for (let attempt = 0; attempt < 800 && anchorages.length < 6; attempt++) {
-    const x = rng() * SVG_W;
-    const y = rng() * SVG_H;
+    const x = 100 + rng() * (SVG_W - 200);
+    const y = 100 + rng() * (SVG_H - 200);
     const d = depthFn(x, y);
     if (d < 4 || d > 22) continue;
     if (anchorages.some(a => Math.hypot(a.x - x, a.y - y) < 150)) continue;
@@ -697,13 +831,13 @@ function grp(id: string, parent: Element): SVGGElement {
 
 const BORDER_MARGIN = 50; // px outside the chart frame for the graduated border
 
-function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
+function renderChart(svgEl: SVGSVGElement, data: ChartData, compassSvgs: { outer: string; inner: string } | null = null): void {
   svgEl.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
   svgEl.setAttribute('width', String(SVG_W));
   svgEl.setAttribute('height', String(SVG_H));
   while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
 
-  const { coastPts, islands, cfg, soundings, contours, shoals, landmarks, harbour,
+  const { coastPts, islands, cfg, depthFn, soundings, contours, shoals, landmarks, harbour,
           cardinalBuoys, compassRose, anchorages, variation, variationDir, seed } = data;
 
   // Clip path
@@ -711,8 +845,28 @@ function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
   const clip = el('clipPath', { id: 'chartClip' }, defs);
   el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H }, clip);
 
-  // Water
-  el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H, fill: '#b8d4e8' }, svgEl);
+  // Water — off-white base for deep water, blue tint for shallow zones
+  el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H, fill: '#ffffff' }, svgEl);
+
+  // Shallow depth fill: grid cells coloured by depth band (deep→shallow = faint→blue)
+  const depthFillG = grp('depth-fill', svgEl);
+  const DFILL_GRID = 12;
+  const depthFillColors: Array<{ maxD: number; fill: string }> = [
+    { maxD:  5, fill: '#a8cfe0' },
+    { maxD: 10, fill: '#bcd9e8' },
+    { maxD: 20, fill: '#d0e6f0' },
+    { maxD: 40, fill: '#e2eff5' },
+  ];
+  for (let gy = 0; gy < SVG_H; gy += DFILL_GRID) {
+    for (let gx = 0; gx < SVG_W; gx += DFILL_GRID) {
+      const d = depthFn(gx + DFILL_GRID / 2, gy + DFILL_GRID / 2);
+      if (d <= 0) continue; // land
+      const band = depthFillColors.find(b => d <= b.maxD);
+      if (!band) continue; // deep water — leave off-white
+      el('rect', { x: gx, y: gy, width: DFILL_GRID, height: DFILL_GRID, fill: band.fill }, depthFillG);
+    }
+  }
+
 
   // Land — close polygon on the land side depending on topology
   const landG = grp('land', svgEl);
@@ -737,11 +891,20 @@ function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
   }, landG);
 
   // Islands
-  for (const islandPoly of islands) {
+  for (const { poly: islandPoly, name: islandName } of islands) {
     el('polygon', {
       points: polyPts(islandPoly),
       fill: '#f5f0dc', stroke: '#8b7355', 'stroke-width': 1.5,
     }, landG);
+    // Label: centroid of the polygon
+    const cx = islandPoly.reduce((s, p) => s + p.x, 0) / islandPoly.length;
+    const cy = islandPoly.reduce((s, p) => s + p.y, 0) / islandPoly.length;
+    el('text', {
+      x: cx, y: cy,
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+      'font-family': 'Georgia, serif', 'font-size': 11,
+      'font-style': 'italic', fill: '#5a3e1b', opacity: 0.85,
+    }, landG).textContent = islandName;
   }
 
   // Depth contours
@@ -821,7 +984,7 @@ function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
 
   // Grid, rose, scale bar, title
   renderGrid(svgEl);
-  renderCompassRose(compassRose, svgEl, variation, variationDir);
+  renderCompassRose(compassRose, svgEl, variation, variationDir, compassSvgs);
   // Scale bar drawn on canvas overlay (see drawScaleBar in canvas.ts)
   renderTitleBlock(svgEl, variation, variationDir, seed);
 }
@@ -850,15 +1013,13 @@ function drawCardinalBuoy(b: CardinalBuoy, parent: Element): void {
   } else if (type === 'south') {
     el('polygon', { points: `${x},${y - 22} ${x - 6},${y - 32} ${x + 6},${y - 32}`, fill: '#000' }, parent);
     el('polygon', { points: `${x},${y - 32} ${x - 6},${y - 42} ${x + 6},${y - 42}`, fill: '#000' }, parent);
-  } else if (type === 'east') {
+  } else if (type === 'west') {
     el('polygon', { points: `${x},${y - 32} ${x - 6},${y - 22} ${x + 6},${y - 22}`, fill: '#000' }, parent);
     el('polygon', { points: `${x},${y - 32} ${x - 6},${y - 42} ${x + 6},${y - 42}`, fill: '#000' }, parent);
-  } else { // west
+  } else { // east
     el('polygon', { points: `${x},${y - 22} ${x - 6},${y - 32} ${x + 6},${y - 32}`, fill: '#000' }, parent);
     el('polygon', { points: `${x},${y - 42} ${x - 6},${y - 32} ${x + 6},${y - 32}`, fill: '#000' }, parent);
   }
-  const label = type.charAt(0).toUpperCase();
-  txt(`${label} ${name}`, { x: x + 9, y: y - 10, 'font-size': 9, fill: '#000', 'font-weight': 'bold', 'font-family': 'Georgia, serif' }, parent);
 }
 
 /**
@@ -972,7 +1133,6 @@ function drawLandmark(lm: Landmark, parent: Element): void {
 
 function renderGrid(svgEl: SVGSVGElement): void {
   const { minLat, maxLat, minLon, maxLon } = CHART_BOUNDS;
-  const M = BORDER_MARGIN;
   const gG = grp('grid', svgEl);
 
   // ── Graticule grid lines (every 5′) ──────────────────────────────────────────
@@ -990,203 +1150,103 @@ function renderGrid(svgEl: SVGSVGElement): void {
   // ── Chart frame ───────────────────────────────────────────────────────────────
   el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H, fill: 'none', stroke: '#1a3a5c', 'stroke-width': 2.5 }, gG);
 
-  // ── Helper: degree + decimal-minutes → string ─────────────────────────────────
-  const fmtLat = (lat: number): string => {
-    const d = Math.floor(Math.abs(lat));
-    const m = (Math.abs(lat) - d) * 60;
-    const mWhole = Math.floor(m);
-    const mFrac  = Math.round((m - mWhole) * 10);
-    const hem = lat >= 0 ? 'N' : 'S';
-    return mFrac > 0
-      ? `${d}°${mWhole.toString().padStart(2,'0')}.${mFrac}'${hem}`
-      : `${d}°${mWhole.toString().padStart(2,'0')}'${hem}`;
-  };
-  const fmtLon = (lon: number): string => {
-    const d = Math.floor(Math.abs(lon));
-    const m = (Math.abs(lon) - d) * 60;
-    const mWhole = Math.floor(m);
-    const mFrac  = Math.round((m - mWhole) * 10);
-    const hem = lon >= 0 ? 'E' : 'W';
-    return mFrac > 0
-      ? `${d.toString().padStart(3,'0')}°${mWhole.toString().padStart(2,'0')}.${mFrac}'${hem}`
-      : `${d.toString().padStart(3,'0')}°${mWhole.toString().padStart(2,'0')}'${hem}`;
-  };
-
-  const FONT = 'Georgia, serif';
-  const COL  = '#1a3a5c';
-
   // Ticks and labels are drawn on the canvas overlay (see drawBorderTicks in canvas.ts)
 }
 
-function renderCompassRose(rose: CompassRose, svgEl: SVGSVGElement, variation: number, variationDir: 'E' | 'W'): void {
+/**
+ * Format variation as degrees and whole minutes, e.g. "4°15'W"
+ */
+export function FormatVariation(variation: number, dir: 'E' | 'W'): string {
+  const deg = Math.floor(variation);
+  const min = Math.round((variation - deg) * 60);
+  return `${deg}°${String(min).padStart(2, '0')}'${dir}`;
+}
+
+function renderCompassRose(rose: CompassRose, svgEl: SVGSVGElement, variation: number, variationDir: 'E' | 'W', compassSvgs: { outer: string; inner: string } | null = null): void {
   const { x, y } = rose;
-  const r = 160;
+  const r = 270;
   const gG = grp('compass-rose', svgEl);
 
-  // Background circle
-  el('circle', { cx: x, cy: y, r: r + 8, fill: 'rgba(255,255,255,0.2)', stroke: '#c033c0', 'stroke-width': 1 }, gG);
+  // ── Embedded compass SVGs ─────────────────────────────────────────────────
+  // Both SVGs share the same coordinate space: 1103×1163, center (550.02, 592.06),
+  // outer tick-ring radius ~482.75 px. We scale to chart rose radius (160 px).
+  if (compassSvgs !== null) {
+    const SVG_CX = 550.02, SVG_CY = 592.06, SVG_OR = 482.75;
+    const scale = r / SVG_OR;
+    const tx = x - SVG_CX * scale;
+    const ty = y - SVG_CY * scale;
 
-  // ── Outer ring: 360 points at 1° increments with major marks every 10° ──
-  for (let deg = 0; deg < 360; deg++) {
-    const rad = ((deg - 90) * Math.PI) / 180;
-    const isMajor = deg % 10 === 0; // every 10°
-    const positionInGroup = deg % 10; // 0-9 within each 10° group
-    const isMidMinor = isMajor ? false : positionInGroup === 5; // every 5th minor marker
+    const stripSvgWrapper = (svg: string): string =>
+      svg
+        .replace(/<\?xml[^>]*\?>/g, '')
+        .replace(/<!DOCTYPE[^>]*>/g, '')
+        .replace(/<svg[^>]*>/, '')
+        .replace(/<\/svg>\s*$/, '')
+        .replace(/<defs[^/]*\/>/g, '');
 
-    let len, width;
-    if (isMajor) {
-      len = r * 0.16;
-      width = 1.2;
-    } else if (isMidMinor) {
-      len = r * 0.10; // medium minor marker
-      width = 0.7;
-    } else {
-      len = r * 0.06; // small minor marker
-      width = 0.4;
-    }
+    // Outer ring — static, no rotation
+    const outerG = document.createElementNS(NS, 'g') as SVGGElement;
+    outerG.setAttribute('transform', `translate(${tx.toFixed(2)},${ty.toFixed(2)}) scale(${scale.toFixed(6)})`);
+    outerG.innerHTML = stripSvgWrapper(compassSvgs.outer);
+    gG.appendChild(outerG);
 
-    const innerX = x + (r + 2) * Math.cos(rad); // Start from outer radius edge
-    const outerX = x + (r + 2 + len) * Math.cos(rad); // Extend outward
-    const innerY = y + (r + 2) * Math.sin(rad);
-    const outerY = y + (r + 2 + len) * Math.sin(rad);
+    // Inner ring — rotated so magnetic north aligns correctly.
+    // The inner SVG's north needle is drawn at bearing 355.751°, meaning it has
+    // ~4.249° of westerly variation baked in. We correct for that offset first,
+    // then apply the chart's actual variation (E = clockwise, W = counter-clockwise).
+    const INNER_BAKED_OFFSET = 4.249;
+    const varDeg = variationDir === 'E'
+      ? INNER_BAKED_OFFSET + variation
+      : INNER_BAKED_OFFSET - variation;
+    const innerG = document.createElementNS(NS, 'g') as SVGGElement;
+    innerG.setAttribute('transform',
+      `translate(${tx.toFixed(2)},${ty.toFixed(2)}) scale(${scale.toFixed(6)}) rotate(${varDeg.toFixed(4)},${SVG_CX},${SVG_CY})`
+    );
+    innerG.innerHTML = stripSvgWrapper(compassSvgs.inner);
+    gG.appendChild(innerG);
 
-    el('line', {
-      x1: innerX, y1: innerY, x2: outerX, y2: outerY,
-      stroke: '#c033c0', 'stroke-width': width, 'stroke-linecap': 'round',
-    }, gG);
+    // ── Dynamic variation label ───────────────────────────────────────────────
+    // Overlays the static text8247 path (which is hidden in compass-outer.svg).
+    // Arc geometry derived from text8247: radius 89.6 SVG units, centered at
+    // (550.02, 592.06), bottom of compass, text reads L→R concave-up.
+    const VAR_ARC_R = 89.6;
+    const arcPathId = `var-arc-${Math.random().toString(36).slice(2, 7)}`;
+    const varLabel = "VARIATION " + FormatVariation(variation, variationDir);
 
-    // Label outer ring degrees (every 10°, excluding 0°)
-    if (isMajor && deg !== 0) {
-      const labelRad = ((deg - 90) * Math.PI) / 180;
-      const labelDist = r + 28;
-      const labelX = x + labelDist * Math.cos(labelRad);
-      const labelY = y + labelDist * Math.sin(labelRad);
-      txt(String(deg), {
-        x: labelX, y: labelY,
-        'text-anchor': 'middle', 'dominant-baseline': 'central',
-        'font-size': 8, fill: '#c033c0', 'font-family': 'sans-serif',
-      }, gG);
-    }
+    // Arc path: bottom semicircle from left to right in SVG coordinate space.
+    // M = left point, A = arc to right point (sweep-flag=0 → bottom arc, concave up).
+    const arcLeft  = `${(SVG_CX - VAR_ARC_R).toFixed(3)},${SVG_CY.toFixed(3)}`;
+    const arcRight = `${(SVG_CX + VAR_ARC_R).toFixed(3)},${SVG_CY.toFixed(3)}`;
+    const arcD = `M ${arcLeft} A ${VAR_ARC_R} ${VAR_ARC_R} 0 0 1 ${arcRight}`;
+
+    // Group uses same transform as outer so coordinates stay in SVG space
+    const varG = document.createElementNS(NS, 'g') as SVGGElement;
+    varG.setAttribute('transform', `translate(${tx.toFixed(2)},${ty.toFixed(2)}) scale(${scale.toFixed(6)})`);
+
+    const defs = document.createElementNS(NS, 'defs');
+    const arcPath = document.createElementNS(NS, 'path');
+    arcPath.setAttribute('id', arcPathId);
+    arcPath.setAttribute('d', arcD);
+    arcPath.setAttribute('fill', 'none');
+    defs.appendChild(arcPath);
+    varG.appendChild(defs);
+
+    const textEl = document.createElementNS(NS, 'text') as SVGTextElement;
+    textEl.setAttribute('class', 'compass-var-text');
+    const textPath = document.createElementNS(NS, 'textPath') as SVGTextPathElement;
+    textPath.setAttribute('href', `#${arcPathId}`);
+    textPath.setAttribute('startOffset', '50%');
+    textPath.textContent = varLabel;
+    textEl.appendChild(textPath);
+    varG.appendChild(textEl);
+
+    gG.appendChild(varG);
+
+    return;
   }
-
-  // North star above the 0° point on outer ring
-  const starRad = ((-90) * Math.PI) / 180;
-  const starX = x + (r + 20) * Math.cos(starRad);
-  const starY = y + (r + 20) * Math.sin(starRad);
-  drawStar(starX, starY, 5, gG);
-
-  // Label "T" for True North on outer ring
-  txt('T', {
-    x: x + (r - 8) * Math.cos(starRad),
-    y: y + (r - 8) * Math.sin(starRad),
-    'text-anchor': 'middle', 'dominant-baseline': 'central',
-    'font-size': 10, fill: '#c033c0', 'font-family': 'sans-serif',
-  }, gG);
-
-  // ── Inner ring: 12 points at 30° increments (Magnetic North) ──
-  // Rotate inner ring by variation amount so magnetic north aligns correctly
-  const variationRad = variationDir === 'E' ? (variation * Math.PI) / 180 : -(variation * Math.PI) / 180;
-  const innerRadius = r * 0.58;
-  
-  for (let i = 0; i < 12; i++) {
-    const deg = i * 30;
-    const rad = ((deg - 90) * Math.PI) / 180 + variationRad; // Add variation rotation
-    const len = r * 0.10;
-
-    const outerX = x + innerRadius * Math.cos(rad);
-    const outerY = y + innerRadius * Math.sin(rad);
-    const innerX = x + (innerRadius - len) * Math.cos(rad);
-    const innerY = y + (innerRadius - len) * Math.sin(rad);
-
-    el('line', {
-      x1: innerX, y1: innerY, x2: outerX, y2: outerY,
-      stroke: '#c033c0', 'stroke-width': 0.8, 'stroke-linecap': 'round',
-    }, gG);
-
-    // Label inner ring degrees (every 30°, excluding 0°)
-    if (deg !== 0) {
-      const labelRad = ((deg - 90) * Math.PI) / 180 + variationRad;
-      const labelDist = innerRadius + 12;
-      const labelX = x + labelDist * Math.cos(labelRad);
-      const labelY = y + labelDist * Math.sin(labelRad);
-      txt(String(deg), {
-        x: labelX, y: labelY,
-        'text-anchor': 'middle', 'dominant-baseline': 'central',
-        'font-size': 7, fill: '#c033c0', 'font-family': 'sans-serif',
-      }, gG);
-    }
-  }
-
-  // Inner circle outline
-  el('circle', { cx: x, cy: y, r: innerRadius, fill: 'none', stroke: '#c033c0', 'stroke-width': 0.8 }, gG);
-
-  // Magnetic North indicator (small "M" on inner ring at top, rotated by variation)
-  const magRad = ((-90) * Math.PI) / 180 + variationRad;
-  txt('M', {
-    x: x + (innerRadius - 14) * Math.cos(magRad),
-    y: y + (innerRadius - 14) * Math.sin(magRad),
-    'text-anchor': 'middle', 'dominant-baseline': 'central',
-    'font-size': 10, fill: '#c033c0', 'font-family': 'sans-serif',
-  }, gG);
-
-  // ── Central hub ──
-  el('circle', { cx: x, cy: y, r: r * 0.04, fill: '#c033c0', stroke: '#c033c0', 'stroke-width': 0.8 }, gG);
-
-  // ── Curved text: Variation ──
-  const textRadius = r * 0.30;
-  const variationText = `var ${variation.toFixed(1)}° ${variationDir}`;
-  drawCurvedText(x, y, textRadius, variationText, gG, '#c033c0', 9);
 }
 
-/**
- * drawStar — simple 5-point star at (cx, cy) with size sz
- */
-function drawStar(cx: number, cy: number, sz: number, parent: Element): void {
-  const pts: Array<{ x: number; y: number }> = [];
-  for (let i = 0; i < 10; i++) {
-    const rad = ((i * 36 - 90) * Math.PI) / 180;
-    const radius = i % 2 === 0 ? sz : sz * 0.4;
-    pts.push({
-      x: cx + radius * Math.cos(rad),
-      y: cy + radius * Math.sin(rad),
-    });
-  }
-  const ptStr = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-  el('polygon', { points: ptStr, fill: '#c033c0', stroke: '#c033c0', 'stroke-width': 0.5 }, parent);
-}
 
-function renderScaleBar(svgEl: SVGSVGElement): void {
-  const gG = grp('scale-bar', svgEl);
-  
-  // Calculate 1 NM at chart center latitude (52°15'N)
-  const centerLat = 52.25;
-  const { y: y0 } = latLonToSVG(centerLat, -4.0);
-  const { y: y1 } = latLonToSVG(centerLat + 1 / 60, -4.0); // 1 minute = 1 NM
-  const pxPerNM = Math.abs(y1 - y0);
-  
-  const bx = SVG_W * 0.04;
-  const by = SVG_H - 40;
-  const bw = pxPerNM * 5;
-
-  el('rect', { x: bx, y: by - 8, width: bw, height: 8, fill: '#1a3a5c' }, gG);
-  for (let i = 0; i < 5; i++) {
-    if (i % 2 === 1) {
-      el('rect', { x: bx + i * pxPerNM, y: by - 8, width: pxPerNM, height: 8, fill: '#fff' }, gG);
-    }
-  }
-  el('rect', { x: bx, y: by - 8, width: bw, height: 8, fill: 'none', stroke: '#1a3a5c', 'stroke-width': 1 }, gG);
-
-  for (let nm = 0; nm <= 5; nm++) {
-    const tx = bx + nm * pxPerNM;
-    el('line', { x1: tx, y1: by - 10, x2: tx, y2: by, stroke: '#1a3a5c', 'stroke-width': 1 }, gG);
-    txt(String(nm), { x: tx, y: by + 10, 'text-anchor': 'middle', 'font-size': 9, fill: '#1a3a5c', 'font-family': 'Georgia, serif' }, gG);
-  }
-  txt('Nautical Miles', {
-    x: bx + bw / 2, y: by + 20,
-    'text-anchor': 'middle', 'font-size': 9,
-    fill: '#1a3a5c', 'font-style': 'italic', 'font-family': 'Georgia, serif',
-  }, gG);
-}
 
 function renderTitleBlock(svgEl: SVGSVGElement, variation: number, variationDir: 'E' | 'W', seed: number): void {
   const gG = grp('title-block', svgEl);
@@ -1210,58 +1270,6 @@ function renderTitleBlock(svgEl: SVGSVGElement, variation: number, variationDir:
   }
 }
 
-/**
- * drawCurvedText — render text along a circular arc
- */
-function drawCurvedText(
-  cx: number,
-  cy: number,
-  radius: number,
-  text: string,
-  parent: Element,
-  color: string,
-  fontSize: number,
-): void {
-  const defs = parent.ownerDocument!.createElementNS('http://www.w3.org/2000/svg', 'defs');
-  const pathId = `curve-${Math.random().toString(36).substr(2, 9)}`;
-  const path = parent.ownerDocument!.createElementNS('http://www.w3.org/2000/svg', 'path');
-
-  // Semicircle at the bottom (below center)
-  const startAngle = (-90 - (text.length * 2.5)) * (Math.PI / 180);
-  const endAngle = (-90 + (text.length * 2.5)) * (Math.PI / 180);
-
-  const startX = cx + radius * Math.cos(startAngle);
-  const startY = cy + radius * Math.sin(startAngle);
-  const endX = cx + radius * Math.cos(endAngle);
-  const endY = cy + radius * Math.sin(endAngle);
-
-  const largeArc = text.length > 15 ? 1 : 0;
-  const d = `M ${startX} ${startY} A ${radius} ${radius} 0 ${largeArc} 1 ${endX} ${endY}`;
-
-  path.setAttribute('id', pathId);
-  path.setAttribute('d', d);
-  path.setAttribute('fill', 'none');
-  defs.appendChild(path);
-  parent.appendChild(defs);
-
-  // textPath element
-  const textElement = parent.ownerDocument!.createElementNS('http://www.w3.org/2000/svg', 'text') as SVGTextElement;
-  textElement.setAttribute('font-size', String(fontSize));
-  textElement.setAttribute('fill', color);
-  textElement.setAttribute('font-family', 'sans-serif');
-  textElement.setAttribute('text-anchor', 'middle');
-
-  const textPath = parent.ownerDocument!.createElementNS('http://www.w3.org/2000/svg', 'textPath') as SVGTextPathElement;
-
-
-
-  textPath.setAttribute('href', `#${pathId}`);
-  textPath.setAttribute('startOffset', '50%');
-  textPath.textContent = text;
-
-  textElement.appendChild(textPath);
-  parent.appendChild(textElement);
-}
 
 export function generateChart(seed: number): ChartData {
   const rng = makeRNG(seed);
@@ -1279,10 +1287,11 @@ export function generateChart(seed: number): ChartData {
   const islands  = buildIslands(noise, rng, cfg, coastPts);
   const depthFn  = buildDepthField(coastPts, noise, cfg, islands);
 
-  const variationValue = 3 + rng() * 2;
+  const variationValue = 1 + rng() * 5;
   const variationDir = rng() > 0.5 ? 'W' : 'E';
 
   const shoals = buildShoals(depthFn, rng);
+  const contours = buildContours(depthFn, [5, 10, 20]);
 
   return {
     seed,
@@ -1292,17 +1301,17 @@ export function generateChart(seed: number): ChartData {
     coastPts,
     islands,
     depthFn,
-    soundings: buildSoundings(depthFn, rng),
-    contours: buildContours(depthFn, [5, 10, 20]),
+    soundings: buildSoundings(depthFn, rng, contours),
+    contours,
     shoals,
-    landmarks: placeLandmarks(coastPts, depthFn, rng, cfg),
+    landmarks: placeLandmarks(coastPts, depthFn, rng, cfg, islands),
     harbour: buildHarbour(coastPts, rng, cfg),
     cardinalBuoys: buildCardinalBuoys(shoals),
-    compassRose: placeCompassRose(depthFn, rng),
+    compassRose: placeCompassRose(depthFn, rng, islands),
     anchorages: buildAnchorages(depthFn, rng),
   };
 }
 
 export function renderChartToSVG(svgEl: SVGSVGElement, data: ChartData): void {
-  renderChart(svgEl, data);
+  renderChart(svgEl, data, { outer: compassOuterSvg, inner: compassInnerSvg });
 }

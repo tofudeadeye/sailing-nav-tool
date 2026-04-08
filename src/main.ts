@@ -6,7 +6,7 @@ import {
   transform, svgToScreen, screenToSVG, svgToLatLon,
   latLonToSVG, formatLatLon, SVG_W, SVG_H,
 } from './coords.ts';
-import { generateChart, renderChartToSVG } from './chartGen.ts';
+import { generateChart, renderChartToSVG, FormatVariation } from './chartGen.ts';
 import type { ChartData, Landmark } from './chartGen.ts';
 import {
   state, wb,
@@ -112,7 +112,8 @@ function newChart(seed?: number): void {
   state.chartData = chartData;
 
   renderChartToSVG(svgEl, chartData);
-  wbVariation.textContent = `${chartData.variation}°W`;
+  // wbVariation.textContent = `${chartData.variation}°W`;
+  wbVariation.textContent = FormatVariation(chartData.variation, chartData.variationDir);
   seedInput.value = String(s);
 
   clearAllLines();
