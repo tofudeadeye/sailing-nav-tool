@@ -1258,7 +1258,8 @@ function renderTitleBlock(svgEl: SVGSVGElement, variation: number, variationDir:
     [`Chart No. FTC-${(seed % 9999) + 1000}`, 10, '#1a3a5c', 'normal'],
     ["Datum WGS84", 9, '#1a3a5c', 'normal'],
     ["Lat 52°00'N – 52°30'N,  Lon 004°53'W – 003°47'W", 8, '#334455', 'normal'],
-    [`Magnetic Variation: ${variation.toFixed(1)}°${variationDir} (2025)`, 9, '#884400', 'normal'],
+    // [`Magnetic Variation: ${variation.toFixed(1)}°${variationDir} (2025)`, 9, '#884400', 'normal'],
+    [`Magnetic Variation: ${FormatVariation(variation, variationDir)} (2025)`, 9, '#884400', 'normal'],
     ['FOR TRAINING USE ONLY – NOT FOR NAVIGATION', 8, '#cc2222', 'bold'],
     [`Seed: ${seed}`, 8, '#888', 'normal'],
   ];
