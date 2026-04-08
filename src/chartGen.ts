@@ -3,13 +3,20 @@ import { SVG_W, SVG_H, latLonToSVG, CHART_BOUNDS, svgToLatLon } from './coords.t
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type LandmarkType = 'lighthouse' | 'church' | 'mast' | 'tower';
+export type LandmarkType = 'lighthouse' | 'church' | 'mast' | 'tower' | 'wreck' | 'rock';
+
+export interface LightSector {
+  fromDeg: number;   // true bearing FROM the lighthouse (0 = North, clockwise)
+  toDeg: number;
+  color: 'white' | 'red' | 'green';
+}
 
 export interface Landmark {
   type: LandmarkType;
   x: number;    // SVG space
   y: number;
   name: string;
+  sectors?: LightSector[];  // lighthouses only
 }
 
 export interface Sounding {
@@ -33,6 +40,8 @@ export interface Shoal {
 
 export type BuoySide = 'port' | 'starboard';
 export type CardinalDirection = 'north' | 'south' | 'east' | 'west';
+export type SafeWaterMark = { x: number; y: number; name: string };
+export type IsolatedDanger = { x: number; y: number; name: string };
 
 export interface ChannelBuoy {
   x: number;
@@ -387,6 +396,76 @@ function buildShoals(depthFn: DepthFn, rng: () => number): Shoal[] {
   return shoals;
 }
 
+// ── Light sectors ─────────────────────────────────────────────────────────────
+
+/**
+ * Estimate the seaward bearing from a lighthouse position by sampling depthFn
+ * at 36 equally-spaced directions. The direction with the most/deepest water
+ * samples is returned as a true bearing (0=N, clockwise).
+ */
+function seawardBearingFromPos(x: number, y: number, depthFn: DepthFn): number {
+  const STEPS = 36;
+  let bestBearing = 0;
+  let bestScore = -Infinity;
+  for (let i = 0; i < STEPS; i++) {
+    const trueBear = (i / STEPS) * 360;
+    const svgAngle = ((trueBear - 90) * Math.PI) / 180;
+    let score = 0;
+    // Sample at several distances along this radial (80, 140, 200 SVG units)
+    for (const r of [80, 140, 200]) {
+      const d = depthFn(x + r * Math.cos(svgAngle), y + r * Math.sin(svgAngle));
+      score += d; // positive = water, -1 = land
+    }
+    if (score > bestScore) { bestScore = score; bestBearing = trueBear; }
+  }
+  return bestBearing;
+}
+
+/**
+ * Generate a plausible set of light sectors for a lighthouse.
+ * Real lighthouses divide the horizon into coloured arcs: white over safe
+ * water, red to port of a hazard, green to starboard of a hazard.
+ * We always produce at least one white arc and optionally flank it with red
+ * and green danger sectors.
+ */
+function genLightSectors(x: number, y: number, depthFn: DepthFn, rng: () => number): LightSector[] {
+  // Centre the white arc on the actual seaward direction
+  const seawardBearing = seawardBearingFromPos(x, y, depthFn);
+
+  // White arc half-width: 40–80°
+  const whiteHalf = 40 + Math.floor(rng() * 40);
+
+  const sectors: LightSector[] = [];
+
+  const hasRed   = rng() > 0.25;
+  const hasGreen = rng() > 0.25;
+
+  // Red sector to the left (port) of safe water
+  if (hasRed) {
+    const redWidth = 15 + Math.floor(rng() * 25);
+    const from = (seawardBearing - whiteHalf - redWidth + 360) % 360;
+    const to   = (seawardBearing - whiteHalf + 360) % 360;
+    sectors.push({ fromDeg: from, toDeg: to, color: 'red' });
+  }
+
+  // White safe-water arc
+  sectors.push({
+    fromDeg: (seawardBearing - whiteHalf + 360) % 360,
+    toDeg:   (seawardBearing + whiteHalf) % 360,
+    color: 'white',
+  });
+
+  // Green sector to the right (starboard) of safe water
+  if (hasGreen) {
+    const greenWidth = 15 + Math.floor(rng() * 25);
+    const from = (seawardBearing + whiteHalf) % 360;
+    const to   = (seawardBearing + whiteHalf + greenWidth) % 360;
+    sectors.push({ fromDeg: from, toDeg: to, color: 'green' });
+  }
+
+  return sectors;
+}
+
 // ── Landmarks ─────────────────────────────────────────────────────────────────
 
 function placeLandmarks(
@@ -396,39 +475,71 @@ function placeLandmarks(
   cfg: CoastConfig,
 ): Landmark[] {
   const landmarks: Landmark[] = [];
-  const types: LandmarkType[] = ['lighthouse', 'church', 'mast', 'tower'];
 
-  for (const type of types) {
-    for (let attempt = 0; attempt < 300; attempt++) {
+  // Land-based types: place near coastline on the land side
+  const landTypes: { type: LandmarkType; count: number }[] = [
+    { type: 'lighthouse', count: 5 },
+    { type: 'church',     count: 6 },
+    { type: 'mast',       count: 4 },
+    { type: 'tower',      count: 4 },
+  ];
+
+  for (const { type, count } of landTypes) {
+    let placed = 0;
+    for (let attempt = 0; attempt < 600 && placed < count; attempt++) {
       const ci = Math.floor(rng() * (coastPts.length - 3));
       const cp = coastPts[ci]!;
-      // Offset into land side
       let x: number, y: number;
       if (cfg.axis === 'vertical') {
         const sign = cfg.waterSide === 'left' ? 1 : -1;
-        x = cp.x + sign * (15 + rng() * 120);
-        y = cp.y + (rng() - 0.5) * 60;
+        x = cp.x + sign * (15 + rng() * 160);
+        y = cp.y + (rng() - 0.5) * 80;
       } else {
-        x = cp.x + (rng() - 0.5) * 60;
+        x = cp.x + (rng() - 0.5) * 80;
         const sign = cfg.waterSide === 'top' ? 1 : -1;
-        y = cp.y + sign * (15 + rng() * 120);
+        y = cp.y + sign * (15 + rng() * 160);
       }
       if (x < 0 || x > SVG_W || y < 0 || y > SVG_H) continue;
       if (depthFn(x, y) > 0) continue; // must be on land
-      if (landmarks.some(l => Math.hypot(l.x - x, l.y - y) < 120)) continue;
-      landmarks.push({ type, x, y, name: landmarkName(type, rng) });
-      break;
+      if (landmarks.some(l => Math.hypot(l.x - x, l.y - y) < 90)) continue;
+      const sectors = type === 'lighthouse' ? genLightSectors(x, y, depthFn, rng) : undefined;
+      landmarks.push({ type, x, y, name: landmarkName(type, rng), sectors });
+      placed++;
     }
   }
+
+  // Water-based: wrecks and rocks scattered in shallow/mid water
+  const waterTypes: { type: LandmarkType; count: number; minD: number; maxD: number }[] = [
+    { type: 'wreck', count: 5, minD: 2, maxD: 25 },
+    { type: 'rock',  count: 6, minD: 0, maxD: 8  },
+  ];
+
+  for (const { type, count, minD, maxD } of waterTypes) {
+    let placed = 0;
+    for (let attempt = 0; attempt < 800 && placed < count; attempt++) {
+      const x = rng() * SVG_W;
+      const y = rng() * SVG_H;
+      const d = depthFn(x, y);
+      if (d < minD || d > maxD) continue;
+      if (landmarks.some(l => Math.hypot(l.x - x, l.y - y) < 80)) continue;
+      landmarks.push({ type, x, y, name: landmarkName(type, rng) });
+      placed++;
+    }
+  }
+
   return landmarks;
 }
 
 function landmarkName(type: LandmarkType, rng: () => number): string {
   const names: Record<LandmarkType, string[]> = {
-    lighthouse: ['Pt. Moran Lt', 'Breakwater Lt', 'Haven Lt', 'Old Head Lt', 'Black Rock Lt'],
-    church:     ["St. Brendan's", 'All Saints', "St. Michael's", 'Chapel Hill', 'Old Church'],
-    mast:       ['Radio Mast', 'TV Mast', 'Signal Mast', 'Comm. Tower'],
-    tower:      ['Water Twr', 'Mill Tower', 'Old Tower', 'Barrow Twr'],
+    lighthouse: ['Pt. Moran Lt', 'Breakwater Lt', 'Haven Lt', 'Old Head Lt', 'Black Rock Lt',
+                 'Gull Point Lt', 'Tern Rock Lt', 'South Head Lt', 'Carrig Lt', 'Dunmore Lt'],
+    church:     ["St. Brendan's", 'All Saints', "St. Michael's", 'Chapel Hill', 'Old Church',
+                 "St. David's", "St. Ciaran's", 'Holy Trinity', 'Abbey Ruins', "St. Ita's"],
+    mast:       ['Radio Mast', 'TV Mast', 'Signal Mast', 'Comm. Tower', 'Coast Gd. Mast', 'Relay Mast'],
+    tower:      ['Water Twr', 'Mill Tower', 'Old Tower', 'Barrow Twr', 'Martello Twr', 'Watch Twr'],
+    wreck:      ['Wk (2003)', 'Wk (1944)', 'Wk (1917)', 'Wk (1982)', 'Wk (1861)'],
+    rock:       ['Carreg Ddu', 'Black Rock', 'Gull Rock', 'Seal Rock', 'Badger Stone', 'The Anvil'],
   };
   const arr = names[type];
   return arr[Math.floor(rng() * arr.length)]!;
@@ -495,12 +606,21 @@ function buildHarbour(
 // ── Cardinal buoys ────────────────────────────────────────────────────────────
 
 function buildCardinalBuoys(shoals: Shoal[]): CardinalBuoy[] {
-  return shoals.slice(0, 3).map(s => ({
-    x: s.x,
-    y: s.y - 35,
-    type: 'north' as const,
-    name: 'N Card',
-  }));
+  const dirs: CardinalDirection[] = ['north', 'south', 'east', 'west'];
+  const offsets: Record<CardinalDirection, { dx: number; dy: number }> = {
+    north: { dx: 0,   dy: -40 },
+    south: { dx: 0,   dy:  40 },
+    east:  { dx:  40, dy: 0   },
+    west:  { dx: -40, dy: 0   },
+  };
+  const buoys: CardinalBuoy[] = [];
+  for (let i = 0; i < shoals.length && i < 8; i++) {
+    const s = shoals[i]!;
+    const dir = dirs[i % dirs.length]!;
+    const off = offsets[dir];
+    buoys.push({ x: s.x + off.dx, y: s.y + off.dy, type: dir, name: `${dir.charAt(0).toUpperCase()} Card` });
+  }
+  return buoys;
 }
 
 // ── Compass rose placement ────────────────────────────────────────────────────
@@ -520,13 +640,14 @@ function placeCompassRose(depthFn: DepthFn, rng: () => number): CompassRose {
 
 function buildAnchorages(depthFn: DepthFn, rng: () => number): Anchorage[] {
   const anchorages: Anchorage[] = [];
-  const names = ['Gull Roads', 'Blind Cove', 'The Haven', 'East Road'] as const;
-  for (let attempt = 0; attempt < 400 && anchorages.length < 2; attempt++) {
+  const names = ['Gull Roads', 'Blind Cove', 'The Haven', 'East Road',
+                 'West Anchorage', 'Seal Bay', 'Long Roads', 'North Cove'] as const;
+  for (let attempt = 0; attempt < 800 && anchorages.length < 6; attempt++) {
     const x = rng() * SVG_W;
     const y = rng() * SVG_H;
     const d = depthFn(x, y);
-    if (d < 5 || d > 20) continue;
-    if (anchorages.some(a => Math.hypot(a.x - x, a.y - y) < 100)) continue;
+    if (d < 4 || d > 22) continue;
+    if (anchorages.some(a => Math.hypot(a.x - x, a.y - y) < 150)) continue;
     anchorages.push({ x, y, name: names[anchorages.length] ?? 'Anchorage' });
   }
   return anchorages;
@@ -717,19 +838,91 @@ function drawChannelBuoy(b: ChannelBuoy, parent: Element): void {
 }
 
 function drawCardinalBuoy(b: CardinalBuoy, parent: Element): void {
-  const { x, y } = b;
+  const { x, y, type, name } = b;
+  // Body: top half black, bottom half yellow (all cardinal buoys)
   el('rect', { x: x - 5, y: y - 20, width: 10, height: 10, fill: '#000000' }, parent);
   el('rect', { x: x - 5, y: y - 10, width: 10, height: 10, fill: '#ffcc00' }, parent);
-  el('polygon', { points: `${x},${y - 32} ${x - 6},${y - 22} ${x + 6},${y - 22}`, fill: '#000' }, parent);
-  el('polygon', { points: `${x},${y - 40} ${x - 6},${y - 30} ${x + 6},${y - 30}`, fill: '#000' }, parent);
   el('line', { x1: x, y1: y, x2: x, y2: y + 14, stroke: '#333', 'stroke-width': 1.5 }, parent);
-  txt('N', { x: x + 9, y: y - 10, 'font-size': 9, fill: '#000', 'font-weight': 'bold' }, parent);
+  // Topmarks differ per cardinal direction
+  if (type === 'north') {
+    el('polygon', { points: `${x},${y - 32} ${x - 6},${y - 22} ${x + 6},${y - 22}`, fill: '#000' }, parent);
+    el('polygon', { points: `${x},${y - 42} ${x - 6},${y - 32} ${x + 6},${y - 32}`, fill: '#000' }, parent);
+  } else if (type === 'south') {
+    el('polygon', { points: `${x},${y - 22} ${x - 6},${y - 32} ${x + 6},${y - 32}`, fill: '#000' }, parent);
+    el('polygon', { points: `${x},${y - 32} ${x - 6},${y - 42} ${x + 6},${y - 42}`, fill: '#000' }, parent);
+  } else if (type === 'east') {
+    el('polygon', { points: `${x},${y - 32} ${x - 6},${y - 22} ${x + 6},${y - 22}`, fill: '#000' }, parent);
+    el('polygon', { points: `${x},${y - 32} ${x - 6},${y - 42} ${x + 6},${y - 42}`, fill: '#000' }, parent);
+  } else { // west
+    el('polygon', { points: `${x},${y - 22} ${x - 6},${y - 32} ${x + 6},${y - 32}`, fill: '#000' }, parent);
+    el('polygon', { points: `${x},${y - 42} ${x - 6},${y - 32} ${x + 6},${y - 32}`, fill: '#000' }, parent);
+  }
+  const label = type.charAt(0).toUpperCase();
+  txt(`${label} ${name}`, { x: x + 9, y: y - 10, 'font-size': 9, fill: '#000', 'font-weight': 'bold', 'font-family': 'Georgia, serif' }, parent);
 }
+
+/**
+ * Build an SVG arc-sector path.
+ * fromDeg / toDeg are TRUE bearings (0=North, clockwise).
+ * SVG angles: 0=East, clockwise. Conversion: svgAngle = trueBearing - 90.
+ */
+function sectorPath(cx: number, cy: number, r: number, fromDeg: number, toDeg: number): string {
+  // Convert true bearing → SVG angle (radians)
+  const toRad = (deg: number) => ((deg - 90) * Math.PI) / 180;
+  const a1 = toRad(fromDeg);
+  const a2 = toRad(toDeg);
+
+  // Normalise so arc always goes clockwise from a1 to a2
+  let sweep = toDeg - fromDeg;
+  if (sweep <= 0) sweep += 360;
+  const largeArc = sweep > 180 ? 1 : 0;
+
+  const x1 = cx + r * Math.cos(a1);
+  const y1 = cy + r * Math.sin(a1);
+  const x2 = cx + r * Math.cos(a2);
+  const y2 = cy + r * Math.sin(a2);
+
+  return `M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${largeArc},1 ${x2},${y2} Z`;
+}
+
+const SECTOR_FILL: Record<LightSector['color'], string> = {
+  white: 'rgba(255,255,255,0.55)',
+  red:   'rgba(210,30,30,0.35)',
+  green: 'rgba(20,160,60,0.35)',
+};
+const SECTOR_STROKE: Record<LightSector['color'], string> = {
+  white: 'rgba(200,200,180,0.7)',
+  red:   'rgba(180,20,20,0.6)',
+  green: 'rgba(10,130,40,0.6)',
+};
 
 function drawLandmark(lm: Landmark, parent: Element): void {
   const { x, y, type, name } = lm;
   switch (type) {
-    case 'lighthouse':
+    case 'lighthouse': {
+      const R = 120; // sector radius in SVG units
+      if (lm.sectors?.length) {
+        for (const s of lm.sectors) {
+          el('path', {
+            d: sectorPath(x, y, R, s.fromDeg, s.toDeg),
+            fill: SECTOR_FILL[s.color],
+            stroke: SECTOR_STROKE[s.color],
+            'stroke-width': 0.8,
+          }, parent);
+        }
+        // Dashed boundary lines at each sector edge
+        for (const s of lm.sectors) {
+          for (const deg of [s.fromDeg, s.toDeg]) {
+            const rad = ((deg - 90) * Math.PI) / 180;
+            el('line', {
+              x1: x, y1: y,
+              x2: x + R * Math.cos(rad),
+              y2: y + R * Math.sin(rad),
+              stroke: '#556', 'stroke-width': 0.6, 'stroke-dasharray': '4,3', opacity: 0.6,
+            }, parent);
+          }
+        }
+      }
       el('circle', { cx: x, cy: y, r: 8, fill: '#cc44aa', stroke: '#881177', 'stroke-width': 1.5 }, parent);
       for (let a = 0; a < 360; a += 45) {
         const rad = (a * Math.PI) / 180;
@@ -740,6 +933,7 @@ function drawLandmark(lm: Landmark, parent: Element): void {
         }, parent);
       }
       break;
+    }
     case 'church':
       el('line', { x1: x, y1: y - 12, x2: x, y2: y + 8,  stroke: '#333', 'stroke-width': 2.5 }, parent);
       el('line', { x1: x - 7, y1: y - 4, x2: x + 7, y2: y - 4, stroke: '#333', 'stroke-width': 2.5 }, parent);
@@ -753,6 +947,20 @@ function drawLandmark(lm: Landmark, parent: Element): void {
     case 'tower':
       el('circle', { cx: x, cy: y - 10, r: 6, fill: 'none', stroke: '#333', 'stroke-width': 2 }, parent);
       el('line', { x1: x, y1: y - 4, x2: x, y2: y + 6, stroke: '#333', 'stroke-width': 2 }, parent);
+      break;
+    case 'wreck':
+      // Standard Admiralty wreck symbol: hull outline with mast
+      el('ellipse', { cx: x, cy: y, rx: 12, ry: 5, fill: 'none', stroke: '#555', 'stroke-width': 1.5, 'stroke-dasharray': '3,2' }, parent);
+      el('line', { x1: x, y1: y - 5, x2: x, y2: y - 14, stroke: '#555', 'stroke-width': 1.5 }, parent);
+      el('line', { x1: x - 6, y1: y - 10, x2: x + 6, y2: y - 10, stroke: '#555', 'stroke-width': 1 }, parent);
+      break;
+    case 'rock':
+      // Admiralty rock awash symbol: asterisk/cross
+      el('line', { x1: x - 7, y1: y, x2: x + 7, y2: y, stroke: '#333', 'stroke-width': 2 }, parent);
+      el('line', { x1: x, y1: y - 7, x2: x, y2: y + 7, stroke: '#333', 'stroke-width': 2 }, parent);
+      el('line', { x1: x - 5, y1: y - 5, x2: x + 5, y2: y + 5, stroke: '#333', 'stroke-width': 1.5 }, parent);
+      el('line', { x1: x + 5, y1: y - 5, x2: x - 5, y2: y + 5, stroke: '#333', 'stroke-width': 1.5 }, parent);
+      el('circle', { cx: x, cy: y, r: 2.5, fill: '#333' }, parent);
       break;
   }
   txt(name, {

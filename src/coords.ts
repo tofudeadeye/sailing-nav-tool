@@ -20,13 +20,13 @@ export interface ChartBounds {
 // Longitude span is derived so that px/NM east == px/NM north, making SVG
 // angles equal to true geodetic bearings (equidistant cylindrical projection).
 //   lon_span = (SVG_W / SVG_H) × lat_span / cos(midLat)
-//            = (2400/1800) × 0.5° / cos(52.25°) ≈ 1.088°
-// centred on the original 004°20′W meridian.
+//            = (2400/1800) × 1.5° / cos(52.25°) ≈ 3.264°
+// centred on the original 004°20′W meridian (tripled from original 0.5° × 1.088°).
 export const CHART_BOUNDS: ChartBounds = {
-  minLat: 52.0,
-  maxLat: 52.5,
-  minLon: -4.877,  // 004°53′W  (was 004°40′W)
-  maxLon: -3.789,  // 003°47′W  (was 004°00′W)
+  minLat: 51.5,
+  maxLat: 53.0,
+  minLon: -5.965,  // 005°58′W
+  maxLon: -2.701,  // 002°42′W
 };
 
 export interface SVGPoint { x: number; y: number; }

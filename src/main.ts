@@ -7,7 +7,7 @@ import {
   latLonToSVG, formatLatLon, SVG_W, SVG_H,
 } from './coords.ts';
 import { generateChart, renderChartToSVG } from './chartGen.ts';
-import type { ChartData } from './chartGen.ts';
+import type { ChartData, Landmark } from './chartGen.ts';
 import {
   state, wb,
   initCanvas, resizeCanvas, redrawCanvas,
@@ -296,6 +296,14 @@ chartWrap.addEventListener('pointermove', (e: PointerEvent) => {
   const sy   = e.clientY - rect.top;
 
   chartWrap.style.cursor = resolveCursor(tool, sx, sy);
+
+  // Marker tooltip — always active regardless of tool
+  const hit = hitTestAllMarkers(sx, sy);
+  if (hit) {
+    showMarkerTooltip(hit.name, hit.descKey, e.clientX, e.clientY, hit.extra);
+  } else {
+    hideMarkerTooltip();
+  }
 });
 
 chartWrap.addEventListener('pointerup', (e: PointerEvent) => {
@@ -321,6 +329,8 @@ chartWrap.addEventListener('pointercancel', () => {
   handlePlotterPointerUp();
   if (state.parallelRules) state.parallelRules.dragging = null;
 });
+
+chartWrap.addEventListener('pointerleave', () => hideMarkerTooltip());
 
 // ── Pencil handlers ───────────────────────────────────────────────────────────
 
@@ -478,6 +488,177 @@ function showToast(msg: string): void {
   t.style.opacity = '1';
   clearTimeout(t._tid);
   t._tid = setTimeout(() => { t!.style.opacity = '0'; }, 3000);
+}
+
+// ── Marker tooltip ────────────────────────────────────────────────────────────
+
+const MARKER_DESC: Record<string, { title: string; body: string }> = {
+  // Landmark types
+  lighthouse: {
+    title: 'Lighthouse',
+    body: 'A fixed light structure used for coastal navigation. The light character (e.g. Fl.2s) tells mariners the flash pattern and period, allowing positive identification at night.',
+  },
+  church: {
+    title: 'Church / Spire',
+    body: 'A conspicuous shore landmark used for visual bearings and fixing position. Spires appear on charts as a cross symbol and are valuable in daytime pilotage.',
+  },
+  mast: {
+    title: 'Radio / Signal Mast',
+    body: 'A prominent vertical structure used as a transit or bearing mark. May also be a Coast Guard signal station for broadcasting weather and navigational warnings.',
+  },
+  tower: {
+    title: 'Tower',
+    body: 'A conspicuous structure (water tower, Martello tower, etc.) used as a visual fix mark. Martello towers are particularly common on British and Irish charts.',
+  },
+  wreck: {
+    title: 'Wreck',
+    body: 'A sunken vessel that may be a hazard to navigation. Shown with a dashed symbol if depth is uncertain. The year indicates when charted. Give a wide berth in poor visibility.',
+  },
+  rock: {
+    title: 'Rock / Obstruction',
+    body: 'A submerged or partially exposed rock hazard. An asterisk symbol (*) indicates a rock that covers and uncovers with the tide. Always consult the tide table before passing close.',
+  },
+  // Buoy types
+  port: {
+    title: 'Port-hand Buoy (IALA-A)',
+    body: 'Red can-shaped buoy — keep to PORT (left) when entering harbour or proceeding upstream. Under IALA Region A (Europe/UK), red is left on entry.',
+  },
+  starboard: {
+    title: 'Starboard-hand Buoy (IALA-A)',
+    body: 'Green conical buoy — keep to STARBOARD (right) when entering harbour or proceeding upstream. Under IALA Region A (Europe/UK), green is right on entry.',
+  },
+  north: {
+    title: 'North Cardinal Buoy',
+    body: 'Yellow/black buoy with two upward-pointing topmarks. Pass to the NORTH of this buoy — the deepest water lies to the north. Light: Q or VQ (continuous white).',
+  },
+  south: {
+    title: 'South Cardinal Buoy',
+    body: 'Black/yellow buoy with two downward-pointing topmarks. Pass to the SOUTH of this buoy — deepest water lies to the south. Light: Q(6)+LFl or VQ(6)+LFl.',
+  },
+  east: {
+    title: 'East Cardinal Buoy',
+    body: 'Black/yellow/black buoy with topmarks pointing apart (egg-timer shape). Pass to the EAST. Light: Q(3) every 10s or VQ(3) every 5s.',
+  },
+  west: {
+    title: 'West Cardinal Buoy',
+    body: 'Yellow/black/yellow buoy with topmarks pointing together (hourglass shape). Pass to the WEST. Light: Q(9) every 15s or VQ(9) every 10s.',
+  },
+  // Anchorage
+  anchorage: {
+    title: 'Anchorage Area',
+    body: 'A designated area with suitable holding ground and depth for anchoring. Check the chart for depth, the almanac for any restrictions, and the forecast before committing.',
+  },
+  // Harbour
+  harbour: {
+    title: 'Harbour / Port',
+    body: 'A sheltered port with pier heads marking the entrance channel. Follow the leading line or channel buoys and reduce speed — the harbour speed limit is typically 5 knots.',
+  },
+};
+
+let tooltipEl: HTMLDivElement | null = null;
+
+function getTooltip(): HTMLDivElement {
+  if (!tooltipEl) {
+    tooltipEl = document.createElement('div');
+    tooltipEl.id = 'marker-tooltip';
+    Object.assign(tooltipEl.style, {
+      position: 'fixed',
+      pointerEvents: 'none',
+      zIndex: '1000',
+      maxWidth: '240px',
+      background: 'rgba(245,240,225,0.97)',
+      border: '1px solid #8a7a55',
+      borderRadius: '4px',
+      padding: '8px 10px',
+      fontFamily: 'Georgia, serif',
+      fontSize: '12px',
+      color: '#1a1a1a',
+      boxShadow: '2px 2px 6px rgba(0,0,0,0.25)',
+      display: 'none',
+      lineHeight: '1.5',
+    });
+    document.body.appendChild(tooltipEl);
+  }
+  return tooltipEl;
+}
+
+function showMarkerTooltip(name: string, descKey: string, clientX: number, clientY: number, extra?: string): void {
+  const info = MARKER_DESC[descKey];
+  if (!info) return;
+  const tt = getTooltip();
+  tt.innerHTML = `<strong style="font-size:13px;display:block;margin-bottom:4px;">${name}</strong><em style="font-size:11px;color:#555;display:block;margin-bottom:5px;">${info.title}</em>${info.body}${extra ? `<div style="margin-top:7px;padding-top:6px;border-top:1px solid #c8b878;">${extra}</div>` : ''}`;
+  tt.style.display = 'block';
+  // Position above-right, keeping within viewport
+  const pad = 10;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let left = clientX + 14;
+  let top  = clientY - 14;
+  if (left + 260 > vw) left = clientX - 270;
+  if (top + tt.offsetHeight + pad > vh) top = clientY - tt.offsetHeight - 10;
+  tt.style.left = `${left}px`;
+  tt.style.top  = `${top}px`;
+}
+
+function hideMarkerTooltip(): void {
+  if (tooltipEl) tooltipEl.style.display = 'none';
+}
+
+const SECTOR_COLOR_LABEL: Record<string, string> = {
+  white: '<span style="display:inline-block;width:10px;height:10px;background:#fff;border:1px solid #aaa;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>White',
+  red:   '<span style="display:inline-block;width:10px;height:10px;background:#d41e1e;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Red',
+  green: '<span style="display:inline-block;width:10px;height:10px;background:#14a03c;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Green',
+};
+const SECTOR_COLOR_MEANING: Record<string, string> = {
+  white: 'safe water',
+  red:   'danger to port',
+  green: 'danger to starboard',
+};
+
+function lighthouseSectorExtra(lm: Landmark): string {
+  if (!lm.sectors?.length) return '';
+  const rows = lm.sectors.map(s => {
+    const label = SECTOR_COLOR_LABEL[s.color] ?? s.color;
+    const meaning = SECTOR_COLOR_MEANING[s.color] ?? '';
+    return `<tr><td style="padding:1px 6px 1px 0;">${label}</td><td style="padding:1px 0;color:#444;">${fmt3(s.fromDeg)}°–${fmt3(s.toDeg)}°T</td><td style="padding:1px 0 1px 6px;color:#666;font-style:italic;">${meaning}</td></tr>`;
+  }).join('');
+  return `<strong style="font-size:11px;">Light sectors:</strong><table style="margin-top:4px;font-size:11px;border-collapse:collapse;">${rows}</table>`;
+}
+
+function hitTestAllMarkers(sx: number, sy: number): { name: string; descKey: string; extra?: string } | null {
+  if (!chartData) return null;
+  const HIT = 18 / transform.scale;   // hit radius in SVG units (scales with zoom)
+  const screenHit = HIT * transform.scale; // back to screen pixels for screen-space markers
+
+  for (const lm of chartData.landmarks) {
+    const sc = svgToScreen(lm.x, lm.y);
+    if (Math.hypot(sc.x - sx, sc.y - sy) < screenHit) {
+      const extra = lm.type === 'lighthouse' ? lighthouseSectorExtra(lm) : undefined;
+      return { name: lm.name, descKey: lm.type, extra };
+    }
+  }
+  for (const b of chartData.harbour.buoys) {
+    const sc = svgToScreen(b.x, b.y);
+    if (Math.hypot(sc.x - sx, sc.y - sy) < screenHit) {
+      return { name: b.side === 'port' ? 'Port-hand Mark' : 'Starboard-hand Mark', descKey: b.side };
+    }
+  }
+  for (const b of chartData.cardinalBuoys) {
+    const sc = svgToScreen(b.x, b.y);
+    if (Math.hypot(sc.x - sx, sc.y - sy) < screenHit) {
+      return { name: b.name, descKey: b.type };
+    }
+  }
+  for (const a of chartData.anchorages) {
+    const sc = svgToScreen(a.x, a.y);
+    if (Math.hypot(sc.x - sx, sc.y - sy) < screenHit) {
+      return { name: a.name, descKey: 'anchorage' };
+    }
+  }
+  const hsc = svgToScreen(chartData.harbour.entrance.x, chartData.harbour.entrance.y);
+  if (Math.hypot(hsc.x - sx, hsc.y - sy) < screenHit * 2) {
+    return { name: chartData.harbour.name, descKey: 'harbour' };
+  }
+  return null;
 }
 
 // ── Tool buttons ──────────────────────────────────────────────────────────────
