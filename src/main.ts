@@ -202,8 +202,8 @@ let panStart  = { x: 0, y: 0 };
 let panOrigin = { x: 0, y: 0 };
 
 chartWrap.addEventListener('pointerdown', (e: PointerEvent) => {
-  // Let clicks on floating panels (STD, etc.) reach their inputs natively
-  if ((e.target as HTMLElement).closest('#std-panel')) return;
+  // Let clicks on floating panels (STD, exercise info, etc.) reach their inputs natively
+  if ((e.target as HTMLElement).closest('#std-panel, #exercise-info')) return;
   e.preventDefault();
   const tool = state.activeTool;
 
@@ -599,12 +599,25 @@ function showExerciseInfo(html: string): void {
   removeExerciseInfo();
   const div = document.createElement('div');
   div.id = 'exercise-info';
-  div.innerHTML = html;
+
+  const toggle = document.createElement('button');
+  toggle.id = 'exercise-info-toggle';
+  toggle.title = 'Collapse exercise info';
+  toggle.textContent = '▲';
+  toggle.addEventListener('click', () => {
+    const collapsed = div.classList.toggle('collapsed');
+    toggle.textContent = collapsed ? '▼' : '▲';
+    toggle.title = collapsed ? 'Expand exercise info' : 'Collapse exercise info';
+  });
+
+  const body = document.createElement('div');
+  body.id = 'exercise-info-body';
+  body.innerHTML = html;
 
   // Convert inline <b> value tags to <span class="val"> for distinct styling.
   // Heading <b> tags are the first *element* child of their <p>/<li> —
   // using firstElementChild avoids whitespace text nodes confusing the check.
-  div.querySelectorAll<HTMLElement>('b').forEach(b => {
+  body.querySelectorAll<HTMLElement>('b').forEach(b => {
     const parent = b.parentElement;
     const isHeading = parent &&
       ['P', 'LI'].includes(parent.tagName) &&
@@ -617,6 +630,8 @@ function showExerciseInfo(html: string): void {
     }
   });
 
+  div.appendChild(toggle);
+  div.appendChild(body);
   chartWrap.appendChild(div);
 }
 

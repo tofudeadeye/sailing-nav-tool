@@ -438,7 +438,7 @@ html, body, #app {
   max-height: calc(100vh - 120px);
   overflow-y: auto;
   font-size: 12px;
-  z-index: 120;
+  z-index: 320;
   line-height: 1.6;
   color: #c8d6e5;
 }
@@ -447,6 +447,29 @@ html, body, #app {
   color: #3fa7d6;
   margin-bottom: 8px;
   font-size: 13px;
+}
+
+#exercise-info-toggle {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: #3fa7d6;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+#exercise-info-toggle:hover { color: #7fd8ff; }
+
+#exercise-info.collapsed {
+  padding-bottom: 8px;
+}
+
+#exercise-info.collapsed #exercise-info-body {
+  display: none;
 }
 
 #exercise-info .val {
