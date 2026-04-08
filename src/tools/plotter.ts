@@ -8,11 +8,11 @@ const PCP_EDGE_EXT = 60;
 const PCP_GRID_SPACING = 16;
 
 function bearingLabel(bearing: number, variation: number, variationDir: 'E' | 'W'): string {
-  const t = Math.round(((bearing % 360) + 360) % 360);
+  const t = (((bearing % 360) + 360) % 360).toFixed(1);
   // West is Best (+): add variation. East is Least (-): subtract variation.
   const signedVar = variationDir === 'W' ? variation : -variation;
-  const m = Math.round((((bearing + signedVar) % 360) + 360) % 360);
-  return `${String(t).padStart(3, '0')}°T (${String(m).padStart(3, '0')}°M)`;
+  const m = ((((bearing + signedVar) % 360) + 360) % 360).toFixed(1);
+  return `${t.padStart(5, '0')}°T (${m.padStart(5, '0')}°M)`;
 }
 
 export function spawnPlotter(svgX: number, svgY: number): void {
