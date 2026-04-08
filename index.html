@@ -10,17 +10,19 @@
   <!-- Toolbar -->
   <div id="toolbar">
     <div id="toolbar-tools">
-      <button class="tool-btn" data-tool="parallel-rules" title="Parallel Rules">&#9639; Rules</button>
-      <button class="tool-btn" data-tool="dividers" title="Dividers">&#9003; Dividers</button>
-      <button class="tool-btn" data-tool="pencil" title="Pencil / Line Plotter">&#9998; Pencil</button>
-      <button class="tool-btn" data-tool="compass" title="Hand Bearing Compass">&#10006; Compass</button>
-      <button class="tool-btn" data-tool="plotter" title="Portland Plotter">&#9676; Plotter</button>
-      <button class="tool-btn" data-tool="std" title="Speed-Time-Distance Calculator">&#9654; S-T-D</button>
-      <button class="tool-btn" id="btn-erase" title="Erase Line">&#9003; Erase</button>
-      <button class="tool-btn" id="btn-clear-all" title="Clear All Lines">&#128465; Clear</button>
+      <button class="tool-btn" data-tool="parallel-rules" data-tooltip="Parallel Rules — Walk a bearing across the chart to the compass rose. Click to place, then drag each rule to transfer the angle.">&#9639; Rules</button>
+      <button class="tool-btn" data-tool="dividers" data-tooltip="Dividers — Measure distances on the latitude scale. Drag the two points apart, then compare against the degree markings.">&#9003; Dividers</button>
+      <button class="tool-btn" data-tool="pencil" data-tooltip="Pencil — Plot lines on the chart. Click once to set the start, again to draw. Lines are labelled by type.">&#9998; Pencil</button>
+      <button class="tool-btn" data-tool="compass" data-tooltip="Hand Bearing Compass — Take a bearing to a charted landmark from the vessel position. Only available during bearing exercises.">&#10006; Compass</button>
+      <button class="tool-btn" data-tool="plotter" data-tooltip="Portland Plotter — Lay the plotter along a course line and read the bearing from the compass rose ring. Drag to move, drag the rose to rotate.">&#9676; Plotter</button>
+      <button class="tool-btn" data-tool="std" data-tooltip="Speed–Time–Distance — Calculate any one of speed, time, or distance given the other two. Results can be pushed to the workbook.">&#9654; S-T-D</button>
+      <button class="tool-btn" id="btn-erase" data-tooltip="Erase — Click a plotted line to remove it from the chart.">&#9003; Erase</button>
+      <button class="tool-btn" id="btn-clear-all" data-tooltip="Clear All — Remove every line drawn on the chart.">&#128465; Clear</button>
     </div>
     <div id="toolbar-right">
       <button id="btn-new-chart">&#8635; New Chart</button>
+      <input id="seed-input" type="number" min="0" placeholder="Seed…" title="Enter seed for reproducible chart" />
+      <button id="btn-seed-chart">&#9654;</button>
       <div id="exercise-picker">
         <button id="btn-exercise-menu">Exercise &#9660;</button>
         <div id="exercise-dropdown" class="hidden">

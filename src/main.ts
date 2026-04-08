@@ -113,6 +113,7 @@ function newChart(seed?: number): void {
 
   renderChartToSVG(svgEl, chartData);
   wbVariation.textContent = `${chartData.variation}°W`;
+  seedInput.value = String(s);
 
   clearAllLines();
   state.accumulatedDist = 0;
@@ -201,6 +202,8 @@ let panStart  = { x: 0, y: 0 };
 let panOrigin = { x: 0, y: 0 };
 
 chartWrap.addEventListener('pointerdown', (e: PointerEvent) => {
+  // Let clicks on floating panels (STD, etc.) reach their inputs natively
+  if ((e.target as HTMLElement).closest('#std-panel')) return;
   e.preventDefault();
   const tool = state.activeTool;
 
@@ -253,7 +256,7 @@ chartWrap.addEventListener('pointerdown', (e: PointerEvent) => {
     }
   }
 
-  if (tool === 'compass') { onCompassClick(e); return; }
+  if (tool === 'compass') { onCompassClick(e); redraw(); return; }
 
   // Pan
   isPanning = true;
@@ -412,7 +415,7 @@ function hitTestLandmark(sx: number, sy: number): boolean {
   if (!chartData) return false;
   for (const lm of chartData.landmarks) {
     const sc = svgToScreen(lm.x, lm.y);
-    if (Math.hypot(sc.x - sx, sc.y - sy) < 40) return true;
+    if (Math.hypot(sc.x - sx, sc.y - sy) < 80) return true;
   }
   return false;
 }
@@ -430,7 +433,7 @@ function onCompassClick(e: PointerEvent): void {
     const d  = Math.hypot(sc.x - sx, sc.y - sy);
     if (d < nearestDist) { nearest = lm; nearestDist = d; }
   }
-  if (!nearest || nearestDist > 40) return;
+  if (!nearest || nearestDist > 80) return;
 
   const vessel = state.vessel ?? chartCentre();
   const { lat: lmLat, lon: lmLon } = svgToLatLon(nearest.x, nearest.y);
@@ -488,7 +491,8 @@ function setActiveTool(tool: ToolName): void {
   document.querySelectorAll<HTMLButtonElement>('.tool-btn[data-tool]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset['tool'] === tool);
   });
-  if (tool === 'std') createSTDPanel(toolLayer);
+  if (tool === 'std') createSTDPanel(toolLayer, () => setActiveTool(null));
+  else document.getElementById('std-panel')?.remove();
   // Use resolveCursor with a dummy position — gives the right initial cursor
   // (crosshair for draw tools, crosshair for unplaced instruments, grab for pan)
   chartWrap.style.cursor = resolveCursor(tool, -1, -1);
@@ -518,6 +522,18 @@ getEl<HTMLButtonElement>('btn-clear-all').addEventListener('click', () => {
 getEl<HTMLButtonElement>('btn-new-chart').addEventListener('click', () => {
   newChart();
   fitChart();
+});
+
+const seedInput = getEl<HTMLInputElement>('seed-input');
+getEl<HTMLButtonElement>('btn-seed-chart').addEventListener('click', () => {
+  const seed = parseInt(seedInput.value);
+  if (!isNaN(seed)) { newChart(seed); fitChart(); }
+});
+seedInput.addEventListener('keydown', (e: KeyboardEvent) => {
+  if (e.key === 'Enter') {
+    const seed = parseInt(seedInput.value);
+    if (!isNaN(seed)) { newChart(seed); fitChart(); }
+  }
 });
 
 // ── Exercise picker ───────────────────────────────────────────────────────────
@@ -574,7 +590,8 @@ function disableToolsExcept(allowed: string[]): void {
 
 function enableAllTools(): void {
   document.querySelectorAll<HTMLButtonElement>('.tool-btn[data-tool]').forEach(btn => {
-    btn.disabled = false;
+    // Compass is only usable during exercises that include it
+    btn.disabled = btn.dataset['tool'] === 'compass';
   });
 }
 
@@ -583,6 +600,23 @@ function showExerciseInfo(html: string): void {
   const div = document.createElement('div');
   div.id = 'exercise-info';
   div.innerHTML = html;
+
+  // Convert inline <b> value tags to <span class="val"> for distinct styling.
+  // Heading <b> tags are the first *element* child of their <p>/<li> —
+  // using firstElementChild avoids whitespace text nodes confusing the check.
+  div.querySelectorAll<HTMLElement>('b').forEach(b => {
+    const parent = b.parentElement;
+    const isHeading = parent &&
+      ['P', 'LI'].includes(parent.tagName) &&
+      parent.firstElementChild === b;
+    if (!isHeading) {
+      const span = document.createElement('span');
+      span.className = 'val';
+      span.innerHTML = b.innerHTML;
+      b.replaceWith(span);
+    }
+  });
+
   chartWrap.appendChild(div);
 }
 
@@ -625,3 +659,4 @@ initCanvas(canvasEl);
 resizeAll();
 newChart();
 fitChart();
+enableAllTools(); // disable compass until an exercise enables it

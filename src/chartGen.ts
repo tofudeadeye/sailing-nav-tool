@@ -72,11 +72,22 @@ export interface Anchorage {
 /** Depth function: returns depth in metres, or -1 if the point is on land. */
 export type DepthFn = (x: number, y: number) => number;
 
+type CoastAxis = 'vertical' | 'horizontal';
+type WaterSide = 'left' | 'right' | 'top' | 'bottom';
+
+export interface CoastConfig {
+  axis: CoastAxis;
+  waterSide: WaterSide;
+  baseOffset: number; // fraction along the perpendicular axis where coast sits
+}
+
 export interface ChartData {
   seed: number;
   variation: number;     // absolute value in degrees
   variationDir: 'E' | 'W'; // East or West
   coastPts: Array<{ x: number; y: number }>;
+  islands: Array<Array<{ x: number; y: number }>>;
+  cfg: CoastConfig;
   depthFn: DepthFn;
   soundings: Sounding[];
   contours: Record<number, ContourSegment[]>;
@@ -104,20 +115,34 @@ function makeRNG(seed: number): () => number {
 
 function buildCoastlinePoints(
   noise: Noise2D,
+  cfg: CoastConfig,
 ): Array<{ x: number; y: number }> {
   const STEPS = 400;
   const pts: Array<{ x: number; y: number }> = [];
 
   for (let i = 0; i <= STEPS; i++) {
     const t = i / STEPS;
-    const n1 = noise(t * 3, 0.5) * 0.18;
-    const n2 = noise(t * 7, 1.5) * 0.07;
-    const n3 = noise(t * 15, 3.0) * 0.03;
-    const rawX = SVG_W * (0.52 + n1 + n2 + n3 + 0.06 * Math.sin(t * Math.PI * 2.5));
-    pts.push({
-      x: Math.max(SVG_W * 0.25, Math.min(SVG_W * 0.85, rawX)),
-      y: t * SVG_H,
-    });
+    const n1 = noise(t * 3, 0.5) * 0.15;
+    const n2 = noise(t * 7, 1.5) * 0.06;
+    const n3 = noise(t * 15, 3.0) * 0.025;
+    const wobble = n1 + n2 + n3 + 0.05 * Math.sin(t * Math.PI * 2.5);
+
+    if (cfg.axis === 'vertical') {
+      // baseOffset = water fraction; coast x = waterFrac if waterSide='left', else 1-waterFrac
+      const coastFrac = cfg.waterSide === 'left' ? cfg.baseOffset : 1 - cfg.baseOffset;
+      const raw = SVG_W * (coastFrac + wobble);
+      pts.push({
+        x: Math.max(SVG_W * 0.12, Math.min(SVG_W * 0.88, raw)),
+        y: t * SVG_H,
+      });
+    } else {
+      const coastFrac = cfg.waterSide === 'top' ? cfg.baseOffset : 1 - cfg.baseOffset;
+      const raw = SVG_H * (coastFrac + wobble);
+      pts.push({
+        x: t * SVG_W,
+        y: Math.max(SVG_H * 0.12, Math.min(SVG_H * 0.88, raw)),
+      });
+    }
   }
 
   return pts;
@@ -128,25 +153,156 @@ function buildCoastlinePoints(
 function buildDepthField(
   coastPts: Array<{ x: number; y: number }>,
   noise: Noise2D,
+  cfg: CoastConfig,
+  islands: Array<Array<{ x: number; y: number }>>,
 ): DepthFn {
-  // Build a per-row coast x lookup for fast distance queries
-  const lookup = new Float32Array(SVG_H + 1);
   const maxIdx = coastPts.length - 3;
-  for (let yi = 0; yi <= SVG_H; yi++) {
-    const idx = Math.min(Math.round((yi / SVG_H) * maxIdx), maxIdx);
-    lookup[yi] = coastPts[idx]!.x;
+
+  // Build lookup: for vertical axis, lookup coast x by row; for horizontal, coast y by col
+  const lookupV = new Float32Array(SVG_H + 1);
+  const lookupH = new Float32Array(SVG_W + 1);
+
+  if (cfg.axis === 'vertical') {
+    for (let yi = 0; yi <= SVG_H; yi++) {
+      const idx = Math.min(Math.round((yi / SVG_H) * maxIdx), maxIdx);
+      lookupV[yi] = coastPts[idx]!.x;
+    }
+  } else {
+    for (let xi = 0; xi <= SVG_W; xi++) {
+      const idx = Math.min(Math.round((xi / SVG_W) * maxIdx), maxIdx);
+      lookupH[xi] = coastPts[idx]!.y;
+    }
   }
 
-  return (x: number, y: number): number => {
-    const yi = Math.max(0, Math.min(SVG_H, Math.round(y)));
-    const coastX = lookup[yi]!;
-    const dist = coastX - x; // positive = water side
-    if (dist <= 0) return -1;
-    const base = Math.min(60, (dist / (SVG_W * 0.45)) * 70);
-    const n = noise(x / 300, y / 300) * 8;
-    const channelBoost = Math.max(0, 10 - Math.abs(x - SVG_W * 0.3) / 30);
-    return Math.max(2, base + n + channelBoost);
+  // Pre-compute island polygons as point arrays for point-in-polygon tests
+  const islandPolys = islands;
+
+  const pointInIsland = (px: number, py: number): boolean => {
+    for (const poly of islandPolys) {
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i]!.x, yi = poly[i]!.y;
+        const xj = poly[j]!.x, yj = poly[j]!.y;
+        const intersect = ((yi > py) !== (yj > py)) &&
+          (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      if (inside) return true;
+    }
+    return false;
   };
+
+  return (x: number, y: number): number => {
+    // Island land check first
+    if (pointInIsland(x, y)) return -1;
+
+    let dist: number;
+    if (cfg.axis === 'vertical') {
+      const yi = Math.max(0, Math.min(SVG_H, Math.round(y)));
+      const coastX = lookupV[yi]!;
+      dist = cfg.waterSide === 'left' ? coastX - x : x - coastX;
+    } else {
+      const xi = Math.max(0, Math.min(SVG_W, Math.round(x)));
+      const coastY = lookupH[xi]!;
+      dist = cfg.waterSide === 'top' ? coastY - y : y - coastY;
+    }
+
+    if (dist <= 0) return -1;
+    const maxDist = cfg.axis === 'vertical' ? SVG_W * cfg.baseOffset : SVG_H * cfg.baseOffset;
+    const base = Math.min(60, (dist / maxDist) * 70);
+    const n = noise(x / 300, y / 300) * 8;
+    return Math.max(2, base + n);
+  };
+}
+
+// ── Islands ───────────────────────────────────────────────────────────────────
+
+function buildIslands(
+  noise: Noise2D,
+  rng: () => number,
+  cfg: CoastConfig,
+  coastPts: Array<{ x: number; y: number }>,
+): Array<Array<{ x: number; y: number }>> {
+  const islands: Array<Array<{ x: number; y: number }>> = [];
+  const count = 2 + Math.floor(rng() * 3); // 2–4 islands
+
+  // Build a fast coast lookup to check if a point is in water
+  const maxIdx = coastPts.length - 3;
+  const lookupV = new Float32Array(SVG_H + 1);
+  const lookupH = new Float32Array(SVG_W + 1);
+  if (cfg.axis === 'vertical') {
+    for (let yi = 0; yi <= SVG_H; yi++) {
+      const idx = Math.min(Math.round((yi / SVG_H) * maxIdx), maxIdx);
+      lookupV[yi] = coastPts[idx]!.x;
+    }
+  } else {
+    for (let xi = 0; xi <= SVG_W; xi++) {
+      const idx = Math.min(Math.round((xi / SVG_W) * maxIdx), maxIdx);
+      lookupH[xi] = coastPts[idx]!.y;
+    }
+  }
+
+  const isWater = (x: number, y: number): boolean => {
+    if (x < 0 || x > SVG_W || y < 0 || y > SVG_H) return false;
+    if (cfg.axis === 'vertical') {
+      const coastX = lookupV[Math.round(Math.min(y, SVG_H))]!;
+      return cfg.waterSide === 'left' ? x < coastX : x > coastX;
+    } else {
+      const coastY = lookupH[Math.round(Math.min(x, SVG_W))]!;
+      return cfg.waterSide === 'top' ? y < coastY : y > coastY;
+    }
+  };
+
+  // Water region: place centre well inside water, away from coast and edges
+  const margin = 160;
+  const coastClearance = 200; // keep islands away from main coast
+
+  for (let attempt = 0; attempt < 400 && islands.length < count; attempt++) {
+    const cx = margin + rng() * (SVG_W - margin * 2);
+    const cy = margin + rng() * (SVG_H - margin * 2);
+
+    // Centre must be in water
+    if (!isWater(cx, cy)) continue;
+
+    // Must be far enough from existing islands
+    if (islands.some(isl => {
+      const ic = isl[Math.floor(isl.length / 2)]!;
+      return Math.hypot(ic.x - cx, ic.y - cy) < 280;
+    })) continue;
+
+    // Build island polygon with noise
+    const r = 55 + rng() * 70;
+    const SIDES = 24;
+    const poly: Array<{ x: number; y: number }> = [];
+    let valid = true;
+
+    for (let i = 0; i < SIDES; i++) {
+      const angle = (i / SIDES) * Math.PI * 2;
+      const nr = r * (0.65 + noise(cx / 400 + Math.cos(angle) * 0.6, cy / 400 + Math.sin(angle) * 0.6) * 0.5 + 0.15);
+      const px = cx + Math.cos(angle) * nr;
+      const py = cy + Math.sin(angle) * nr;
+
+      // Every vertex of the island must be in water (not on land)
+      if (!isWater(px, py)) { valid = false; break; }
+
+      // Keep away from coast
+      if (cfg.axis === 'vertical') {
+        const coastX = lookupV[Math.round(Math.max(0, Math.min(SVG_H, py)))]!;
+        const distToCoast = cfg.waterSide === 'left' ? coastX - px : px - coastX;
+        if (distToCoast < coastClearance) { valid = false; break; }
+      } else {
+        const coastY = lookupH[Math.round(Math.max(0, Math.min(SVG_W, px)))]!;
+        const distToCoast = cfg.waterSide === 'top' ? coastY - py : py - coastY;
+        if (distToCoast < coastClearance) { valid = false; break; }
+      }
+
+      poly.push({ x: px, y: py });
+    }
+
+    if (valid && poly.length === SIDES) islands.push(poly);
+  }
+
+  return islands;
 }
 
 // ── Soundings ─────────────────────────────────────────────────────────────────
@@ -221,8 +377,8 @@ function buildContours(
 
 function buildShoals(depthFn: DepthFn, rng: () => number): Shoal[] {
   const shoals: Shoal[] = [];
-  for (let attempt = 0; attempt < 200 && shoals.length < 6; attempt++) {
-    const x = rng() * SVG_W * 0.55;
+  for (let attempt = 0; attempt < 400 && shoals.length < 6; attempt++) {
+    const x = rng() * SVG_W;
     const y = rng() * SVG_H;
     const d = depthFn(x, y);
     if (d < 3 || d > 15) continue;
@@ -237,6 +393,7 @@ function placeLandmarks(
   coastPts: Array<{ x: number; y: number }>,
   depthFn: DepthFn,
   rng: () => number,
+  cfg: CoastConfig,
 ): Landmark[] {
   const landmarks: Landmark[] = [];
   const types: LandmarkType[] = ['lighthouse', 'church', 'mast', 'tower'];
@@ -245,8 +402,17 @@ function placeLandmarks(
     for (let attempt = 0; attempt < 300; attempt++) {
       const ci = Math.floor(rng() * (coastPts.length - 3));
       const cp = coastPts[ci]!;
-      const x = cp.x + 15 + rng() * 120;
-      const y = cp.y + (rng() - 0.5) * 60;
+      // Offset into land side
+      let x: number, y: number;
+      if (cfg.axis === 'vertical') {
+        const sign = cfg.waterSide === 'left' ? 1 : -1;
+        x = cp.x + sign * (15 + rng() * 120);
+        y = cp.y + (rng() - 0.5) * 60;
+      } else {
+        x = cp.x + (rng() - 0.5) * 60;
+        const sign = cfg.waterSide === 'top' ? 1 : -1;
+        y = cp.y + sign * (15 + rng() * 120);
+      }
       if (x < 0 || x > SVG_W || y < 0 || y > SVG_H) continue;
       if (depthFn(x, y) > 0) continue; // must be on land
       if (landmarks.some(l => Math.hypot(l.x - x, l.y - y) < 120)) continue;
@@ -273,6 +439,7 @@ function landmarkName(type: LandmarkType, rng: () => number): string {
 function buildHarbour(
   coastPts: Array<{ x: number; y: number }>,
   rng: () => number,
+  cfg: CoastConfig,
 ): Harbour {
   const ci = Math.min(
     Math.floor(coastPts.length * 0.35 + rng() * coastPts.length * 0.3),
@@ -282,19 +449,40 @@ function buildHarbour(
   const hw = 40 + rng() * 30;
   const depth = 60 + rng() * 60;
 
-  const portPier  = { x: entrance.x + 10, y: entrance.y - hw };
-  const stbdPier  = { x: entrance.x + 10, y: entrance.y + hw };
-  const portInner = { x: entrance.x + depth, y: entrance.y - hw * 0.3 };
-  const stbdInner = { x: entrance.x + depth, y: entrance.y + hw * 0.3 };
-
+  // Piers and inner points extend into land, buoys extend into water
+  let portPier, stbdPier, portInner, stbdInner;
   const buoys: ChannelBuoy[] = [];
-  for (let i = 1; i <= 4; i++) {
-    const t = i / 4.5;
-    const cx = entrance.x - t * SVG_W * 0.18;
-    buoys.push(
-      { x: cx, y: entrance.y - 22, side: 'port' },
-      { x: cx, y: entrance.y + 22, side: 'starboard' },
-    );
+
+  if (cfg.axis === 'vertical') {
+    const landSign = cfg.waterSide === 'left' ? 1 : -1;
+    const waterSign = -landSign;
+    portPier  = { x: entrance.x + landSign * 10, y: entrance.y - hw };
+    stbdPier  = { x: entrance.x + landSign * 10, y: entrance.y + hw };
+    portInner = { x: entrance.x + landSign * depth, y: entrance.y - hw * 0.3 };
+    stbdInner = { x: entrance.x + landSign * depth, y: entrance.y + hw * 0.3 };
+    for (let i = 1; i <= 4; i++) {
+      const t = i / 4.5;
+      const cx = entrance.x + waterSign * t * SVG_W * 0.18;
+      buoys.push(
+        { x: cx, y: entrance.y - 22, side: 'port' },
+        { x: cx, y: entrance.y + 22, side: 'starboard' },
+      );
+    }
+  } else {
+    const landSign = cfg.waterSide === 'top' ? 1 : -1;
+    const waterSign = -landSign;
+    portPier  = { x: entrance.x - hw, y: entrance.y + landSign * 10 };
+    stbdPier  = { x: entrance.x + hw, y: entrance.y + landSign * 10 };
+    portInner = { x: entrance.x - hw * 0.3, y: entrance.y + landSign * depth };
+    stbdInner = { x: entrance.x + hw * 0.3, y: entrance.y + landSign * depth };
+    for (let i = 1; i <= 4; i++) {
+      const t = i / 4.5;
+      const cy = entrance.y + waterSign * t * SVG_H * 0.18;
+      buoys.push(
+        { x: entrance.x - 22, y: cy, side: 'port' },
+        { x: entrance.x + 22, y: cy, side: 'starboard' },
+      );
+    }
   }
 
   const names = ['Port Carrig', 'Havenmouth', 'Dunmore Hbr', 'Cwm Harbour'] as const;
@@ -319,11 +507,11 @@ function buildCardinalBuoys(shoals: Shoal[]): CardinalBuoy[] {
 
 function placeCompassRose(depthFn: DepthFn, rng: () => number): CompassRose {
   for (let attempt = 0; attempt < 500; attempt++) {
-    const x = SVG_W * (0.05 + rng() * 0.35);
-    const y = SVG_H * (0.1 + rng() * 0.8);
+    const x = SVG_W * (0.05 + rng() * 0.9);
+    const y = SVG_H * (0.05 + rng() * 0.9);
     if (depthFn(x, y) < 20) continue;
     if (x < 150 || y < 150 || x > SVG_W - 150 || y > SVG_H - 150) continue;
-    return { x, y, r: 90 }; // r value is overridden in renderCompassRose
+    return { x, y, r: 90 };
   }
   return { x: SVG_W * 0.18, y: SVG_H * 0.25, r: 90 };
 }
@@ -333,8 +521,8 @@ function placeCompassRose(depthFn: DepthFn, rng: () => number): CompassRose {
 function buildAnchorages(depthFn: DepthFn, rng: () => number): Anchorage[] {
   const anchorages: Anchorage[] = [];
   const names = ['Gull Roads', 'Blind Cove', 'The Haven', 'East Road'] as const;
-  for (let attempt = 0; attempt < 200 && anchorages.length < 2; attempt++) {
-    const x = rng() * SVG_W * 0.6;
+  for (let attempt = 0; attempt < 400 && anchorages.length < 2; attempt++) {
+    const x = rng() * SVG_W;
     const y = rng() * SVG_H;
     const d = depthFn(x, y);
     if (d < 5 || d > 20) continue;
@@ -394,7 +582,7 @@ function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
   svgEl.setAttribute('height', String(SVG_H));
   while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
 
-  const { coastPts, soundings, contours, shoals, landmarks, harbour,
+  const { coastPts, islands, cfg, soundings, contours, shoals, landmarks, harbour,
           cardinalBuoys, compassRose, anchorages, variation, variationDir, seed } = data;
 
   // Clip path
@@ -405,13 +593,35 @@ function renderChart(svgEl: SVGSVGElement, data: ChartData): void {
   // Water
   el('rect', { x: 0, y: 0, width: SVG_W, height: SVG_H, fill: '#b8d4e8' }, svgEl);
 
-  // Land
+  // Land — close polygon on the land side depending on topology
   const landG = grp('land', svgEl);
-  const landPoly = [...coastPts, { x: SVG_W, y: SVG_H }, { x: SVG_W, y: 0 }];
+  let landClosing: Array<{ x: number; y: number }>;
+  if (cfg.axis === 'vertical') {
+    if (cfg.waterSide === 'left') {
+      landClosing = [{ x: SVG_W, y: SVG_H }, { x: SVG_W, y: 0 }];
+    } else {
+      landClosing = [{ x: 0, y: SVG_H }, { x: 0, y: 0 }];
+    }
+  } else {
+    if (cfg.waterSide === 'top') {
+      landClosing = [{ x: SVG_W, y: SVG_H }, { x: 0, y: SVG_H }];
+    } else {
+      landClosing = [{ x: SVG_W, y: 0 }, { x: 0, y: 0 }];
+    }
+  }
+  const landPoly = [...coastPts, ...landClosing];
   el('polygon', {
     points: polyPts(landPoly),
     fill: '#f5f0dc', stroke: '#8b7355', 'stroke-width': 1.5,
   }, landG);
+
+  // Islands
+  for (const islandPoly of islands) {
+    el('polygon', {
+      points: polyPts(islandPoly),
+      fill: '#f5f0dc', stroke: '#8b7355', 'stroke-width': 1.5,
+    }, landG);
+  }
 
   // Depth contours
   const contourColors: Record<number, string> = { 5: '#7aafc8', 10: '#5b9ab5', 20: '#3d7fa0' };
@@ -848,24 +1058,38 @@ function drawCurvedText(
 export function generateChart(seed: number): ChartData {
   const rng = makeRNG(seed);
   const noise = createNoise2D(seed + 1);
-  const coastPts = buildCoastlinePoints(noise);
-  const depthFn = buildDepthField(coastPts, noise);
-  
+
+  // Pick topology
+  const axis: CoastAxis = rng() > 0.5 ? 'vertical' : 'horizontal';
+  const waterSide: WaterSide = axis === 'vertical'
+    ? (rng() > 0.5 ? 'left' : 'right')
+    : (rng() > 0.5 ? 'top' : 'bottom');
+  const baseOffset = 0.65 + rng() * 0.10; // coast at 65–75%, giving ~70% water
+  const cfg: CoastConfig = { axis, waterSide, baseOffset };
+
+  const coastPts = buildCoastlinePoints(noise, cfg);
+  const islands  = buildIslands(noise, rng, cfg, coastPts);
+  const depthFn  = buildDepthField(coastPts, noise, cfg, islands);
+
   const variationValue = 3 + rng() * 2;
   const variationDir = rng() > 0.5 ? 'W' : 'E';
+
+  const shoals = buildShoals(depthFn, rng);
 
   return {
     seed,
     variation: variationValue,
     variationDir,
+    cfg,
     coastPts,
+    islands,
     depthFn,
     soundings: buildSoundings(depthFn, rng),
     contours: buildContours(depthFn, [5, 10, 20]),
-    shoals: buildShoals(depthFn, rng),
-    landmarks: placeLandmarks(coastPts, depthFn, rng),
-    harbour: buildHarbour(coastPts, rng),
-    cardinalBuoys: buildCardinalBuoys(buildShoals(depthFn, rng)),
+    shoals,
+    landmarks: placeLandmarks(coastPts, depthFn, rng, cfg),
+    harbour: buildHarbour(coastPts, rng, cfg),
+    cardinalBuoys: buildCardinalBuoys(shoals),
     compassRose: placeCompassRose(depthFn, rng),
     anchorages: buildAnchorages(depthFn, rng),
   };

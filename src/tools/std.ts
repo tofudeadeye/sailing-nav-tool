@@ -1,12 +1,12 @@
 import { state, wb } from './types.ts';
 
-export function createSTDPanel(toolLayer: HTMLElement): void {
+export function createSTDPanel(toolLayer: HTMLElement, onClose?: () => void): void {
   if (document.getElementById('std-panel')) return;
 
   const panel = document.createElement('div');
   panel.id = 'std-panel';
   panel.innerHTML = `
-    <h4>Speed · Time · Distance</h4>
+    <h4>Speed · Time · Distance <button id="std-close-btn" style="float:right;background:none;border:none;color:#a0b4c8;cursor:pointer;font-size:14px;line-height:1;padding:0;">✕</button></h4>
     <div class="std-row">
       <label>Speed</label>
       <input type="number" id="std-speed" min="0" max="30" step="0.1" value="6" />
@@ -43,6 +43,11 @@ export function createSTDPanel(toolLayer: HTMLElement): void {
   speedEl.addEventListener('input', update);
   timeEl.addEventListener('input', update);
   update();
+
+  panel.querySelector('#std-close-btn')!.addEventListener('click', () => {
+    panel.remove();
+    onClose?.();
+  });
 
   panel.querySelector('#std-push-btn')!.addEventListener('click', () => {
     const res = state.stdResult;

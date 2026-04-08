@@ -226,34 +226,34 @@ export function generateExercise1(cd: ChartData): Ex1DeadReckoning {
       <br />
       <p><b>Given:</b></p>
       <ul>
-        <li>Departure (⊕): ${formatLatLon(dep!.lat, dep!.lon)}</li>
-        <li>True Course: <b>${courseDeg}°T</b></li>
-        <li>Speed: <b>${speedKn.toFixed(1)} kn</b></li>
-        <li>Time: <b>${timeHours}h ${String(timeMinutes).padStart(2, '0')}min</b> (${timeMin} min)</li>
-        <li>Variation: <b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></li>
+        <li>Departure (⊕): <code><b>${formatLatLon(dep!.lat, dep!.lon)}</b></code></li>
+        <li>True Course: <code><b>${courseDeg}°T</b></code></li>
+        <li>Speed: <code><b>${speedKn.toFixed(1)} kn</b></code></li>
+        <li>Time: <code><b>${timeHours}h ${String(timeMinutes).padStart(2, '0')}min (${timeMin} min)</b></code></li>
+        <li>Variation: <code><b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></code></li>
       </ul>
       <br />
       <p><b>Step 1 — Calculate distance run:</b><br>
-      <code>Distance = Speed × Time(h) = ${speedKn.toFixed(1)} × ${(timeMin/60).toFixed(2)} = <b>${distance.toFixed(2)} NM</b></code></p>
+      <code>Distance = Speed × Time(h) = <b>${speedKn.toFixed(1)} × ${(timeMin/60).toFixed(2)} = ${distance.toFixed(2)} NM</b></code></p>
       <br />
       <p><b>Step 2 — Magnetic course (for the helmsman only):</b><br>
       Charts are plotted in TRUE. Variation converts true to magnetic so the helmsman can steer on the compass.<br>
-      <code>Mag = True ${cd.variationDir === 'W' ? '+' : '−'} Var = ${courseDeg}° ${cd.variationDir === 'W' ? '+' : '−'} ${cd.variation.toFixed(1)}° = <b>${magCourse.toFixed(1)}°M</b></code><br>
+      <code>Mag = True ${cd.variationDir === 'W' ? '+' : '−'} Var = <b>${courseDeg}° ${cd.variationDir === 'W' ? '+' : '−'} ${cd.variation.toFixed(1)}° = ${magCourse.toFixed(1)}°M</b></code><br>
       <em>Do NOT apply variation when plotting on the chart — plot the true course directly.</em></p>
       <br />
-      <p><b>Step 3 — Set the plotter to ${courseDeg}°T:</b><br>
-      Place the plotter centre on the compass rose. Rotate the body until the long-axis index aligns with <b>${courseDeg}° on the outer (TRUE) ring</b>. The inner magnetic ring is only used for compass steering.</p>
+      <p><b>Step 3 — Set the plotter:</b><br>
+      Set the plotter to <b>${courseDeg}°T</b>. Place the plotter centre on the compass rose. Rotate the body until the long-axis index aligns with <b>${courseDeg}°</b> on the outer (TRUE) ring. The inner magnetic ring is only used for compass steering.</p>
       <br />
       <p><b>Step 4 — Slide the plotter to the departure mark (⊕):</b><br>
       Keep the plotter's angle locked. Slide it across the chart — do not rotate — until the course-edge line passes through ⊕. Draw a light line along that edge.</p>
       <br />
-      <p><b>Step 5 — Measure ${distance.toFixed(2)} NM along the course line:</b><br>
+      <p><b>Step 5 — Measure the distance along the course line:</b><br>
       Open the dividers on the <b>latitude scale</b> (left or right chart edge) to span <b>${distance.toFixed(2)} minutes of latitude = ${distance.toFixed(2)} NM</b>. One minute of latitude always equals exactly 1 NM. Place one point on ⊕ and step the dividers along the course line.</p>
       <br />
       <p><b>Step 6 — Mark and label the DR position:</b><br>
       The second divider point is your DR. Mark it with a small circle and label it <b>DR ${Math.floor(timeMin/60)}${String(timeMinutes).padStart(2,'0')}</b>. Then use the pencil tool to submit your mark.</p>
       <br />
-      <p><b>Answer:</b> DR at ${formatLatLon(drPos!.lat, drPos!.lon)} — tolerance ±0.3 NM.</p>
+      <p><b>Answer:</b> DR at <b>${formatLatLon(drPos!.lat, drPos!.lon)}</b> — tolerance ±0.3 NM.</p>
       <br />
       <p><b>Common errors:</b></p>
       <ul>
@@ -299,9 +299,9 @@ export function generateExercise2(cd: ChartData): Ex2CourseToSteer {
       <br />
       <p><b>Given:</b></p>
       <ul>
-        <li>Departure (⊕): ${formatLatLon(dep.lat, dep.lon)}</li>
-        <li>Destination (⊗): ${formatLatLon(dest.lat, dest.lon)}</li>
-        <li>Variation: <b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></li>
+        <li>Departure (⊕): <code><b>${formatLatLon(dep.lat, dep.lon)}</b></code></li>
+        <li>Destination (⊗): <code><b>${formatLatLon(dest.lat, dest.lon)}</b></code></li>
+        <li>Variation: <code><b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></code></li>
       </ul>
       <br />
       <p><b>Step 1 — Read the true course from the chart:</b><br>
@@ -314,7 +314,7 @@ export function generateExercise2(cd: ChartData): Ex2CourseToSteer {
       (West variation adds; East variation subtracts.)</p>
       <br />
       <p><b>Step 3 — Convert to magnetic:</b><br>
-      <code>${tc.toFixed(1)}° ${cd.variationDir === 'W' ? '+' : '−'} ${cd.variation.toFixed(1)}° = <b>${mc.toFixed(1)}°M</b></code><br>
+      <code><b>${tc.toFixed(1)}° ${cd.variationDir === 'W' ? '+' : '−'} ${cd.variation.toFixed(1)}° = ${mc.toFixed(1)}°M</b></code><br>
       The helmsman steers <b>${mc.toFixed(1)}°M</b>. This is never plotted on the chart — it is only for the compass.</p>
       <br />
       <p><b>Step 4 — Enter in workbook:</b><br>
@@ -371,15 +371,15 @@ export function generateExercise3(cd: ChartData): Ex3CrossBearing {
       By observing compass bearings to two or more charted landmarks simultaneously, you can draw position lines on the chart. Where they cross is your fix. Three bearings are preferred — the small triangle they form (the "cocked hat") shows the accuracy of your observations.</p>
       <br />
       <p><b>Given — magnetic bearings from vessel to landmarks:</b></p>
-      ${bearings.map(b => `<p style="margin:2px 0"><b>${b.lm.name}:</b> ${b.magBear.toFixed(1)}°M</p>`).join('')}
-      <p>Variation: <b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></p>
+      ${bearings.map(b => `<p style="margin:2px 0"><b>${b.lm.name}:</b> <b>${b.magBear.toFixed(1)}°M</b></p>`).join('')}
+      <p>Variation: <code><b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></code></p>
       <br />
       <p><b>Step 1 — Convert each magnetic bearing to true:</b><br>
       <code>True = Magnetic ${cd.variationDir === 'W' ? '−' : '+'} Variation</code>
       (Reversing the TVMDC rule: going Mag→True, West subtracts, East adds.)</p>
       ${bearings.map(b => {
         const tb = ((b.trueBear + 360) % 360).toFixed(1);
-        return `<p style="margin:2px 0">${b.lm.name}: ${b.magBear.toFixed(1)}° ${cd.variationDir === 'W' ? '−' : '+'} ${cd.variation.toFixed(1)}° = <b>${tb}°T</b></p>`;
+        return `<p style="margin:2px 0">${b.lm.name}: <code><b>${b.magBear.toFixed(1)}° ${cd.variationDir === 'W' ? '−' : '+'} ${cd.variation.toFixed(1)}° = ${tb}°T</b></code></p>`;
       }).join('')}
       <br />
       <p><b>Step 2 — Find the reciprocal bearing for each line:</b><br>
@@ -388,14 +388,14 @@ export function generateExercise3(cd: ChartData): Ex3CrossBearing {
       ${bearings.map(b => {
         const tb = (b.trueBear + 360) % 360;
         const recip = ((tb + 180) % 360).toFixed(1);
-        return `<p style="margin:2px 0">${b.lm.name}: ${tb.toFixed(1)}°T → reciprocal <b>${recip}°T</b></p>`;
+        return `<p style="margin:2px 0">${b.lm.name}: <code><b>${tb.toFixed(1)}°T</b></code> → reciprocal <code><b>${recip}°T</b></code></p>`;
       }).join('')}
       <br />
       <p><b>Step 3 — Plot the position lines:</b><br>
       For each landmark, set the plotter to the reciprocal bearing and draw a line outward from the landmark. Use the outer (TRUE) ring of the compass rose.</p>
       <br />
-      <p><b>Step 4 — Mark your fix:</b><br>
-      The point where the lines intersect (or the centre of the cocked hat) is your position. Mark it and submit.</p>
+      <p><b>Step 4 — Submit:</b><br>
+      The point where the lines intersect (or the centre of the cocked hat) is your position. Once all three bearing lines are drawn, press Submit — scoring is based on the accuracy of your plotted lines.</p>
       <br />
       <p><b>Common errors:</b></p>
       <ul>
@@ -444,10 +444,10 @@ export function generateExercise4(cd: ChartData): Ex4DistanceETA {
       <br />
       <p><b>Given:</b></p>
       <ul>
-        <li>Departure (⊕): ${formatLatLon(dep.lat, dep.lon)}</li>
-        <li>Destination (⊗): ${formatLatLon(dest.lat, dest.lon)}</li>
-        <li>Speed: <b>${speedKn.toFixed(1)} kn</b></li>
-        <li>Departure time: <b>${depTime}</b></li>
+        <li>Departure (⊕): <code><b>${formatLatLon(dep.lat, dep.lon)}</b></code></li>
+        <li>Destination (⊗): <code><b>${formatLatLon(dest.lat, dest.lon)}</b></code></li>
+        <li>Speed: <code><b>${speedKn.toFixed(1)} kn</b></code></li>
+        <li>Departure time: <code><b>${depTime}</b></code></li>
       </ul>
       <br />
       <p><b>Step 1 — Measure distance with dividers:</b><br>
@@ -467,9 +467,9 @@ export function generateExercise4(cd: ChartData): Ex4DistanceETA {
       <br />
       <p><b>Working solution:</b></p>
       <ul>
-        <li>Distance: <b>${trueDist.toFixed(2)} NM</b></li>
-        <li>Time underway: <b>${trueDist.toFixed(2)} ÷ ${speedKn.toFixed(1)} = ${(timeMin / 60).toFixed(3)} h = ${Math.floor(timeMin)}m ${Math.round((timeMin % 1) * 60)}s ≈ <b>${Math.round(timeMin)} min</b></li>
-        <li>ETA: ${depTime} + ${Math.floor(timeMin)}m = <b>${eta}</b></li>
+        <li>Distance: <code><b>${trueDist.toFixed(2)} NM</b></code></li>
+        <li>Time underway: <code><b>${trueDist.toFixed(2)} ÷ ${speedKn.toFixed(1)} = ${(timeMin / 60).toFixed(3)} h ≈ ${Math.round(timeMin)} min</b></code></li>
+        <li>ETA: <code><b>${depTime}</b> + <b>${Math.floor(timeMin)} min</b> = <b>${eta}</b></code></li>
       </ul>
       <br />
       <p><b>Common errors:</b></p>
@@ -513,8 +513,8 @@ export function generateExercise5(cd: ChartData): Ex5ClearingBearing {
       <p><b>Given:</b></p>
       <ul>
         <li>Hazard: shoal marked on chart (red circle)</li>
-        <li>Reference landmark: <b>${lm?.name ?? 'Landmark'}</b></li>
-        <li>Variation: <b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></li>
+        <li>Reference landmark: <code><b>${lm?.name ?? 'Landmark'}</b></code></li>
+        <li>Variation: <code><b>${cd.variation.toFixed(1)}°${cd.variationDir}</b></code></li>
       </ul>
       <br />
       <p><b>Step 1 — Find the true bearing from the landmark to the hazard:</b><br>
@@ -612,16 +612,16 @@ export function generateExercise6(cd: ChartData): Ex6SetAndDrift {
       <br />
       <p><b>Given:</b></p>
       <ul>
-        <li>Departure (⊕): ${formatLatLon(dep!.lat, dep!.lon)}</li>
-        <li>True course steered: <b>${courseDeg}°T</b></li>
-        <li>Speed through water: <b>${speedKn.toFixed(1)} kn</b></li>
-        <li>Time underway: <b>${timeMin} min (${(timeMin/60).toFixed(2)} h)</b></li>
+        <li>Departure (⊕): <code><b>${formatLatLon(dep!.lat, dep!.lon)}</b></code></li>
+        <li>True course steered: <code><b>${courseDeg}°T</b></code></li>
+        <li>Speed through water: <code><b>${speedKn.toFixed(1)} kn</b></code></li>
+        <li>Time underway: <code><b>${timeMin} min (${(timeMin/60).toFixed(2)} h)</b></code></li>
         <li>Actual fix (⊗): shown on chart</li>
       </ul>
       <br />
       <p><b>Step 1 — Calculate the DR position:</b><br>
-      <code>Distance = ${speedKn.toFixed(1)} kn × ${(timeMin/60).toFixed(2)} h = ${(speedKn*(timeMin/60)).toFixed(2)} NM</code><br>
-      From ⊕, set the plotter to <b>${courseDeg}°T</b> and draw a course line. Step the dividers ${(speedKn*(timeMin/60)).toFixed(2)} NM along it to find the DR position. Mark it with a semicircle labelled "DR".</p>
+      <code>Distance = <b>${speedKn.toFixed(1)} kn × ${(timeMin/60).toFixed(2)} h = ${(speedKn*(timeMin/60)).toFixed(2)} NM</b></code><br>
+      From ⊕, set the plotter to <b>${courseDeg}°T</b> and draw a course line. Step the dividers <b>${(speedKn*(timeMin/60)).toFixed(2)} NM</b> along it to find the DR position. Mark it with a semicircle labelled "DR".</p>
       <br />
       <p><b>Step 2 — Draw the current vector (DR → Fix):</b><br>
       Draw a line from your DR position to the actual fix (⊗). This vector represents the displacement caused by current over the elapsed time.</p>

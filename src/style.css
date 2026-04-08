@@ -24,7 +24,7 @@ html, body, #app {
   padding: 4px 8px;
   gap: 6px;
   flex-wrap: wrap;
-  z-index: 100;
+  z-index: 200;
 }
 
 #toolbar-tools {
@@ -38,6 +38,29 @@ html, body, #app {
   gap: 6px;
   align-items: center;
 }
+
+#seed-input {
+  width: 80px;
+  background: #0f3460;
+  color: #e0e0e0;
+  border: 1px solid #1a5276;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+}
+#seed-input::placeholder { color: #6a8aaa; }
+
+#btn-seed-chart {
+  background: #0f3460;
+  color: #e0e0e0;
+  border: 1px solid #1a5276;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#btn-seed-chart:hover { background: #1a5276; }
 
 .tool-btn, #btn-new-chart, #btn-exercise-menu {
   background: #0f3460;
@@ -65,6 +88,43 @@ html, body, #app {
 .tool-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+/* ── Tool button tooltips ────────────────────────────────────── */
+.tool-btn[data-tooltip] {
+  position: relative;
+}
+
+.tool-btn[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  transform: none;
+  background: rgba(10, 18, 40, 0.97);
+  color: #c8d6e5;
+  border: 1px solid #2e86ab;
+  border-radius: 5px;
+  padding: 7px 11px;
+  font-size: 11px;
+  font-family: 'Courier New', monospace;
+  line-height: 1.5;
+  white-space: normal;
+  width: 220px;
+  max-width: 90vw;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.55);
+  pointer-events: none;
+  z-index: 400;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.tool-btn[data-tooltip]:hover::after {
+  opacity: 1;
+}
+
+.tool-btn[data-tooltip]:disabled:hover::after {
+  opacity: 1;
 }
 
 /* ── Exercise dropdown ───────────────────────────────────────── */
@@ -387,4 +447,15 @@ html, body, #app {
   color: #3fa7d6;
   margin-bottom: 8px;
   font-size: 13px;
+}
+
+#exercise-info .val {
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  background: rgba(46, 134, 171, 0.2);
+  color: #7fd8ff;
+  border: 1px solid rgba(46, 134, 171, 0.4);
+  border-radius: 3px;
+  padding: 1px 5px;
+  white-space: nowrap;
 }
