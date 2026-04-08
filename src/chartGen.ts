@@ -1135,14 +1135,16 @@ function renderGrid(svgEl: SVGSVGElement): void {
   const { minLat, maxLat, minLon, maxLon } = CHART_BOUNDS;
   const gG = grp('grid', svgEl);
 
-  // ── Graticule grid lines (every 5′) ──────────────────────────────────────────
-  const step = 5 / 60;
+  // ── Graticule grid lines (every 5′ latitude; longitude step scaled so cells are square) ──
+  const latStep = 5 / 60;
+  const midLat = (minLat + maxLat) / 2;
+  const lonStep = latStep / Math.cos((midLat * Math.PI) / 180);
 
-  for (let lat = Math.ceil(minLat / step) * step; lat <= maxLat + 1e-9; lat += step) {
+  for (let lat = Math.ceil(minLat / latStep) * latStep; lat <= maxLat + 1e-9; lat += latStep) {
     const { y } = latLonToSVG(lat, minLon);
     el('line', { x1: 0, y1: y, x2: SVG_W, y2: y, stroke: '#6699bb', 'stroke-width': 0.4, opacity: 0.5 }, gG);
   }
-  for (let lon = Math.ceil(minLon / step) * step; lon <= maxLon + 1e-9; lon += step) {
+  for (let lon = Math.ceil(minLon / lonStep) * lonStep; lon <= maxLon + 1e-9; lon += lonStep) {
     const { x } = latLonToSVG(minLat, lon);
     el('line', { x1: x, y1: 0, x2: x, y2: SVG_H, stroke: '#6699bb', 'stroke-width': 0.4, opacity: 0.5 }, gG);
   }
