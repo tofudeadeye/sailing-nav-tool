@@ -64,8 +64,53 @@
     <div class="wb-field">ETA: <span id="wb-eta">—</span></div>
     <div class="wb-field">DR Pos: <span id="wb-dr-pos">—</span></div>
     <div class="wb-field" id="wb-exercise-field" style="display:none">Exercise: <span id="wb-exercise-name">—</span> <button id="wb-submit">Submit</button></div>
+    <div class="wb-field wb-github">
+      <a href="https://github.com/tofudeadeye/sailing-nav-tool" target="_blank" rel="noopener noreferrer">&#128279; GitHub</a>
+    </div>
+  </div>
+
+  <!-- Welcome / Disclaimer Modal -->
+  <div id="welcome-overlay">
+    <div id="welcome-box">
+      <h2>Virtual Chart Navigation Trainer</h2>
+      <div id="welcome-badge">Educational Use Only</div>
+      <div id="welcome-body">
+        <p>
+          Welcome to the <strong>Virtual Chart Navigation Trainer</strong> — an interactive tool
+          designed to help you practise fundamental coastal navigation techniques including
+          dead reckoning, cross bearings, course planning, and more.
+        </p>
+        <p>
+          <strong>Please read before continuing:</strong>
+        </p>
+        <ul>
+          <li>This tool is intended for <strong>educational and training purposes only</strong>. It must not be used for real-world navigation, voyage planning, or safety-critical decisions.</li>
+          <li>Charts, landmarks, depths, and all geographic features are <strong>procedurally generated</strong> and do not represent any real-world location.</li>
+          <li>Icon placement, soundings, bearings, and labelling may contain inaccuracies or simplifications for the sake of the learning exercise.</li>
+          <li>Terminology and conventions used are approximate and may differ from official hydrographic publications (e.g. UKHO, NOAA).</li>
+          <li>Always refer to <strong>official, up-to-date charts</strong> and qualified instruction for any real navigation activity.</li>
+        </ul>
+        <p class="welcome-footer-note">
+          Feel free to contribute a fix or improvement on <a href="https://github.com/tofudeadeye/sailing-nav-tool" target="_blank" rel="noopener noreferrer">GitHub</a>.
+        </p>
+      </div>
+      <button id="welcome-close">I Understand — Start Training</button>
+    </div>
   </div>
 
   <script type="module" src="/src/main.ts"></script>
+  <script>
+    (function () {
+      const overlay = document.getElementById('welcome-overlay');
+      const closeBtn = document.getElementById('welcome-close');
+      if (localStorage.getItem('nav-game-welcomed')) {
+        overlay.style.display = 'none';
+      }
+      closeBtn.addEventListener('click', function () {
+        localStorage.setItem('nav-game-welcomed', '1');
+        overlay.style.display = 'none';
+      });
+    })();
+  </script>
 </body>
 </html>

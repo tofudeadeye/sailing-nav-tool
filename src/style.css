@@ -268,6 +268,22 @@ html, body, #app {
   color: #a0b4c8;
 }
 
+.wb-github {
+  margin-left: auto;
+  border-right: none;
+}
+
+.wb-github a {
+  color: #707888;
+  text-decoration: none;
+  font-size: 0.78rem;
+  transition: color 0.15s;
+}
+
+.wb-github a:hover {
+  color: #a8d8ea;
+}
+
 .wb-field span {
   color: #e0e0e0;
   font-weight: bold;
@@ -500,4 +516,111 @@ html, body, #app {
   text-anchor: middle;
   dominant-baseline: middle;
   writing-mode: lr;
+}
+
+/* ── Welcome / Disclaimer Modal ──────────────────────────────── */
+#welcome-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 30, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(3px);
+}
+
+#welcome-box {
+  background: #16213e;
+  border: 2px solid #0f3460;
+  border-radius: 10px;
+  max-width: 560px;
+  width: 90%;
+  padding: 28px 32px 24px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+#welcome-box h2 {
+  font-size: 1.2rem;
+  color: #a8d8ea;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+#welcome-badge {
+  align-self: center;
+  background: #7b2d2d;
+  color: #ffb3b3;
+  font-size: 0.72rem;
+  font-weight: bold;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 12px;
+  border-radius: 3px;
+  border: 1px solid #c0392b;
+}
+
+#welcome-body {
+  font-size: 0.82rem;
+  line-height: 1.65;
+  color: #c8cfe0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#welcome-body strong {
+  color: #e0e0e0;
+}
+
+#welcome-body ul {
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#welcome-body ul li {
+  list-style: disc;
+}
+
+.welcome-footer-note {
+  font-size: 0.72rem;
+  color: #707888;
+  font-style: italic;
+  text-align: center;
+}
+
+.welcome-footer-note a {
+  color: #a8d8ea;
+  text-decoration: none;
+  border-bottom: 1px solid #1a5276;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.welcome-footer-note a:hover {
+  color: #ffffff;
+  border-bottom-color: #a8d8ea;
+}
+
+#welcome-close {
+  align-self: center;
+  margin-top: 4px;
+  background: #0f3460;
+  color: #a8d8ea;
+  border: 1px solid #1a5276;
+  border-radius: 5px;
+  padding: 8px 22px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+#welcome-close:hover {
+  background: #1a5276;
+  color: #ffffff;
 }
