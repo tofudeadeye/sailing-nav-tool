@@ -222,7 +222,7 @@ export function generateExercise1(cd: ChartData): Ex1DeadReckoning {
       <h4>Exercise 1 — Dead Reckoning</h4>
 
       <p><b>What is Dead Reckoning?</b><br>
-      Dead reckoning (DR) is estimating your current position by advancing a known past position using course, speed, and elapsed time. It assumes no current, leeway, or steering error — those effects are accounted for later by comparing the DR to an observed fix.</p>
+      Dead reckoning (DR) is the process of calculating the current position of a moving object by using a previously determined position, or fix, and incorporating estimates of speed, heading (or direction or course), and elapsed time. It assumes no current, leeway, or steering error — those effects are accounted for later by comparing the DR to an observed fix.</p>
       <br />
       <p><b>Given:</b></p>
       <ul>
@@ -295,6 +295,9 @@ export function generateExercise2(cd: ChartData): Ex2CourseToSteer {
     infoHTML: `
       <h4>Exercise 2 — Course to Steer</h4>
 
+      <p><b>What is Course to Steer?</b><br>
+      A "course to steer" (CTS) is the compass heading a navigator must hold to ensure a vessel follows a specific intended track over the ground, accounting for external forces like tide, current, and wind.</p>
+      <br />
       <p><b>Objective:</b> Find the true course from ⊕ to ⊗, then convert it to the magnetic course the helmsman steers by compass.</p>
       <br />
       <p><b>Given:</b></p>
@@ -368,7 +371,7 @@ export function generateExercise3(cd: ChartData): Ex3CrossBearing {
       <h4>Exercise 3 — Fix by Cross Bearing</h4>
 
       <p><b>What is a cross bearing fix?</b><br>
-      By observing compass bearings to two or more charted landmarks simultaneously, you can draw position lines on the chart. Where they cross is your fix. Three bearings are preferred — the small triangle they form (the "cocked hat") shows the accuracy of your observations.</p>
+      By observing compass bearings to two or more charted landmarks simultaneously, you can draw position lines on the chart. Where they cross is your "fix" aka current position. Three bearings are preferred — the small triangle they form (the "cocked hat") shows the accuracy of your observations, the smaller the better.</p>
       <br />
       <p><b>Given — magnetic bearings from vessel to landmarks:</b></p>
       ${bearings.map(b => `<p style="margin:2px 0"><b>${b.lm.name}:</b> <b>${b.magBear.toFixed(1)}°M</b></p>`).join('')}
