@@ -72,8 +72,10 @@ function drawBorderTicks(c: CanvasRenderingContext2D, screenW: number, screenH: 
   const chartW = topRight.x - topLeft.x;   // SVG_W * s
   const chartH = bottomLeft.y - topLeft.y; // SVG_H * s
 
-  const TICK_LONG  = 16;
-  const TICK_SHORT = 8;
+  const TICK_DEGREE = 24;   // whole-degree crossing
+  const TICK_MAJOR  = 16;   // 5-minute tick
+  const TICK_MINOR  = 12;   // 1-minute tick
+  const TICK_HALF   = 5;    // 0.5-minute (30-second) subdivision
   const BG = 'rgba(220,232,240,0.97)';
   const FG = '#1a3a5c';
   const fontSize = 10;
@@ -108,61 +110,95 @@ function drawBorderTicks(c: CanvasRenderingContext2D, screenW: number, screenH: 
   for (let m = 0; m <= latMins; m++) {
     const svgY = m * pxPerLatMin;
     const { y: sy } = svgToScreen(0, svgY);
-    const isMajor = m % 5 === 0;
-    const tLen = isMajor ? TICK_LONG : TICK_SHORT;
+
+    const latDeg   = maxLat - (m / latMins) * (maxLat - minLat);
+    const absLat   = Math.abs(latDeg);
+    const latMn    = Math.round((absLat - Math.floor(absLat)) * 60);
+    const isDegree = latMn === 0;
+    const isMajor  = m % 5 === 0;
+    const tLen     = isDegree ? TICK_DEGREE : isMajor ? TICK_MAJOR : TICK_MINOR;
 
     c.beginPath();
     c.moveTo(topLeft.x, sy);
-    c.lineTo(topLeft.x + tLen, sy);
+    c.lineTo(topLeft.x - tLen, sy);
     c.stroke();
 
     c.beginPath();
     c.moveTo(topRight.x, sy);
-    c.lineTo(topRight.x - tLen, sy);
+    c.lineTo(topRight.x + tLen, sy);
     c.stroke();
 
     if (isMajor) {
-      const latDeg = maxLat - (svgY / SVG_H) * (maxLat - minLat);
-      const d = Math.floor(Math.abs(latDeg));
-      const mn = Math.round((Math.abs(latDeg) - d) * 60).toString().padStart(2, '0');
-      const label = `${d}°${mn}'`;
+      const d     = Math.floor(absLat);
+      const hemi  = latDeg >= 0 ? 'N' : 'S';
+      const label = `${d}°${String(latMn).padStart(2, '0')}'${hemi}`;
+
+      c.font = isDegree
+        ? `bold ${fontSize + 2}px "Courier New", monospace`
+        : `${fontSize}px "Courier New", monospace`;
 
       c.textAlign = 'right';
-      c.fillText(label, topLeft.x - 3, sy + fontSize * 0.4);
+      c.fillText(label, topLeft.x - (tLen + 2), sy + fontSize * 0.4);
       c.textAlign = 'left';
-      c.fillText(label, topRight.x + 3, sy + fontSize * 0.4);
+      c.fillText(label, topRight.x + (tLen + 2), sy + fontSize * 0.4);
+
+      c.font = `${fontSize}px "Courier New", monospace`;
     }
+  }
+
+  // 0.5-minute subdivision ticks on left and right edges
+  for (let hm = 1; hm < latMins * 2; hm += 2) {
+    const svgY = (hm / 2) * pxPerLatMin;
+    const { y: sy } = svgToScreen(0, svgY);
+    c.beginPath(); c.moveTo(topLeft.x, sy); c.lineTo(topLeft.x - TICK_HALF, sy); c.stroke();
+    c.beginPath(); c.moveTo(topRight.x, sy); c.lineTo(topRight.x + TICK_HALF, sy); c.stroke();
   }
 
   // ── Lon ticks on top and bottom edges ────────────────────────────────────
   for (let m = 0; m <= lonMins; m++) {
     const svgX = m * pxPerLonMin;
     const { x: sx } = svgToScreen(svgX, 0);
-    const isMajor = m % 5 === 0;
-    const tLen = isMajor ? TICK_LONG : TICK_SHORT;
+
+    const lonDeg   = minLon + (m / lonMins) * (maxLon - minLon);
+    const absLon   = Math.abs(lonDeg);
+    const lonMn    = Math.round((absLon - Math.floor(absLon)) * 60);
+    const isDegree = lonMn === 0;
+    const isMajor  = m % 5 === 0;
+    const tLen     = isDegree ? TICK_DEGREE : isMajor ? TICK_MAJOR : TICK_MINOR;
 
     c.beginPath();
     c.moveTo(sx, topLeft.y);
-    c.lineTo(sx, topLeft.y + tLen);
+    c.lineTo(sx, topLeft.y - tLen);
     c.stroke();
 
     c.beginPath();
     c.moveTo(sx, bottomLeft.y);
-    c.lineTo(sx, bottomLeft.y - tLen);
+    c.lineTo(sx, bottomLeft.y + tLen);
     c.stroke();
 
     if (isMajor) {
-      const lonDeg = minLon + (svgX / SVG_W) * (maxLon - minLon);
-      const sign = lonDeg < 0 ? 'W' : 'E';
-      const absD = Math.abs(lonDeg);
-      const d = Math.floor(absD);
-      const mn = Math.round((absD - d) * 60).toString().padStart(2, '0');
-      const label = `${d}°${mn}'${sign}`;
+      const d     = Math.floor(absLon);
+      const sign  = lonDeg < 0 ? 'W' : 'E';
+      const label = `${d}°${String(lonMn).padStart(2, '0')}'${sign}`;
+
+      c.font = isDegree
+        ? `bold ${fontSize + 2}px "Courier New", monospace`
+        : `${fontSize}px "Courier New", monospace`;
 
       c.textAlign = 'center';
-      c.fillText(label, sx, topLeft.y - 3);
-      c.fillText(label, sx, bottomLeft.y + fontSize + 2);
+      c.fillText(label, sx, topLeft.y - (tLen + 2));
+      c.fillText(label, sx, bottomLeft.y + tLen + fontSize + 1);
+
+      c.font = `${fontSize}px "Courier New", monospace`;
     }
+  }
+
+  // 0.5-minute subdivision ticks on top and bottom edges
+  for (let hm = 1; hm < lonMins * 2; hm += 2) {
+    const svgX = (hm / 2) * pxPerLonMin;
+    const { x: sx } = svgToScreen(svgX, 0);
+    c.beginPath(); c.moveTo(sx, topLeft.y); c.lineTo(sx, topLeft.y - TICK_HALF); c.stroke();
+    c.beginPath(); c.moveTo(sx, bottomLeft.y); c.lineTo(sx, bottomLeft.y + TICK_HALF); c.stroke();
   }
 
   // ── Axis labels ───────────────────────────────────────────────────────────

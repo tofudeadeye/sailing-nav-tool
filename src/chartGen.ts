@@ -1151,10 +1151,9 @@ function renderGrid(svgEl: SVGSVGElement): void {
   const { minLat, maxLat, minLon, maxLon } = CHART_BOUNDS;
   const gG = grp('grid', svgEl);
 
-  // ── Graticule grid lines (every 5′ latitude; longitude step scaled so cells are square) ──
+  // ── Graticule grid lines (every 5′ latitude and longitude) ──
   const latStep = 5 / 60;
-  const midLat = (minLat + maxLat) / 2;
-  const lonStep = latStep / Math.cos((midLat * Math.PI) / 180);
+  const lonStep = 5 / 60;
 
   for (let lat = Math.ceil(minLat / latStep) * latStep; lat <= maxLat + 1e-9; lat += latStep) {
     const { y } = latLonToSVG(lat, minLon);

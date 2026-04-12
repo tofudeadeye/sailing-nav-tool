@@ -55,8 +55,8 @@ export interface ChartBounds {
 export const CHART_BOUNDS: ChartBounds = {
   minLat: 51.5,
   maxLat: 53.0,
-  minLon: -5.965,  // 005°58′W
-  maxLon: -2.701,  // 002°42′W
+  minLon: -6.0,    // 006°00′W
+  maxLon: -2.5,    // 002°30′W
 };
 
 export interface SVGPoint { x: number; y: number; }
