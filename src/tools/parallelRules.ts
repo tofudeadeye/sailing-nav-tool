@@ -4,7 +4,7 @@ import { state } from './types.ts';
 function bearingLabel(b: Bearing, variation: number, variationDir: 'E' | 'W'): string {
   const signedVar = variationDir === 'W' ? variation : -variation;
   const m = mkBearing(b.value + signedVar);
-  return `${b.toTrue()} (${m.toMag()})`;
+  return `${b.asTrue()} (${m.asMag()})`;
 }
 
 export function spawnParallelRules(

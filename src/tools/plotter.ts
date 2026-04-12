@@ -12,7 +12,7 @@ function bearingLabel(deg: number, variation: number, variationDir: 'E' | 'W'): 
   // West is Best (+): add variation. East is Least (-): subtract variation.
   const signedVar = variationDir === 'W' ? variation : -variation;
   const m = mkBearing(deg + signedVar);
-  return `${t.toTrue()} (${m.toMag()})`;
+  return `${t.asTrue()} (${m.asMag()})`;
 }
 
 export function spawnPlotter(svgX: number, svgY: number): void {
