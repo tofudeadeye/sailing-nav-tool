@@ -1,4 +1,4 @@
-import { transform, svgToScreen, screenToSVG } from '../coords.ts';
+import { transform, svgToScreen, screenToSVG, bearing } from '../coords.ts';
 import { state, wb } from './types.ts';
 import type { DrawnLine, LineType } from './types.ts';
 
@@ -46,7 +46,7 @@ export function drawLines(c: CanvasRenderingContext2D): void {
     const bearing = svgLineBearing(line.svgX1, line.svgY1, line.svgX2, line.svgY2);
     c.fillStyle = '#2244aa';
     c.font = '10px Courier New';
-    c.fillText(`${line.type}: ${Math.round(bearing)}°T`, mx + 4, my - 4);
+    c.fillText(`${line.type}: ${bearing.toFixed(1)}°T`, mx + 4, my - 4);
     c.restore();
   }
 
@@ -98,7 +98,7 @@ export function handlePencilPointerDown(
     state.lines.push(line);
     if (wb.setCourse) {
       wb.setCourse(
-        svgLineBearing(line.svgX1, line.svgY1, line.svgX2, line.svgY2),
+        bearing(svgLineBearing(line.svgX1, line.svgY1, line.svgX2, line.svgY2)),
         state.chartData?.variation ?? 0,
       );
     }
@@ -120,6 +120,7 @@ export function handlePencilPointerMove(
 
 export function clearAllLines(): void {
   state.lines = [];
+  state.fixes = [];
   pencilStart = null;
   pencilPreviewEnd = null;
 }

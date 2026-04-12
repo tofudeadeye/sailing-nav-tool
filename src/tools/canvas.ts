@@ -3,6 +3,7 @@ import { drawDividers } from './dividers.ts';
 import { drawPlotterOverlay } from './plotter.ts';
 import { drawParallelRules } from './parallelRules.ts';
 import { transform, SVG_W, SVG_H, CHART_BOUNDS, svgToScreen } from '../coords.ts';
+import { state } from './types.ts';
 
 let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
@@ -22,10 +23,33 @@ export function redrawCanvas(): void {
   if (!ctx || !canvas) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawLines(ctx);
+  drawFixes(ctx);
   drawDividers(ctx);
   drawPlotterOverlay(ctx);
   drawBorderTicks(ctx, canvas.width, canvas.height);
   drawScaleBar(ctx, canvas.width, canvas.height);
+}
+
+function drawFixes(c: CanvasRenderingContext2D): void {
+  for (const fix of state.fixes) {
+    const sc = svgToScreen(fix.svgX, fix.svgY);
+    const r = 6;
+    c.save();
+    c.strokeStyle = '#cc2200';
+    c.lineWidth = 2;
+    // Circle
+    c.beginPath();
+    c.arc(sc.x, sc.y, r, 0, Math.PI * 2);
+    c.stroke();
+    // Cross
+    c.beginPath();
+    c.moveTo(sc.x - r - 3, sc.y);
+    c.lineTo(sc.x + r + 3, sc.y);
+    c.moveTo(sc.x, sc.y - r - 3);
+    c.lineTo(sc.x, sc.y + r + 3);
+    c.stroke();
+    c.restore();
+  }
 }
 
 /**

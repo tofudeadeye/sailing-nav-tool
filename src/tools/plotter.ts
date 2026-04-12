@@ -1,4 +1,4 @@
-import { svgToScreen, screenToSVG } from '../coords.ts';
+import { svgToScreen, screenToSVG, bearing as mkBearing } from '../coords.ts';
 import { state } from './types.ts';
 
 const PCP_W   = 560;
@@ -7,12 +7,12 @@ const PCP_ROSE_R = 100;
 const PCP_EDGE_EXT = 60;
 const PCP_GRID_SPACING = 16;
 
-function bearingLabel(bearing: number, variation: number, variationDir: 'E' | 'W'): string {
-  const t = (((bearing % 360) + 360) % 360).toFixed(1);
+function bearingLabel(deg: number, variation: number, variationDir: 'E' | 'W'): string {
+  const t = mkBearing(deg);
   // West is Best (+): add variation. East is Least (-): subtract variation.
   const signedVar = variationDir === 'W' ? variation : -variation;
-  const m = ((((bearing + signedVar) % 360) + 360) % 360).toFixed(1);
-  return `${t.padStart(5, '0')}°T (${m.padStart(5, '0')}°M)`;
+  const m = mkBearing(deg + signedVar);
+  return `${t.toTrue()} (${m.toMag()})`;
 }
 
 export function spawnPlotter(svgX: number, svgY: number): void {

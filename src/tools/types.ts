@@ -1,4 +1,5 @@
 import type { ChartData } from '../chartGen.ts';
+import { type Bearing } from '../coords.ts';
 
 
 export type ToolName =
@@ -39,7 +40,7 @@ export interface ParallelRulesState {
   pivot:    'rule1' | 'rule2' | null;
   dragStartSX: number; dragStartSY: number;
   dragStartX:  number; dragStartY:  number;
-  onBearingUpdate: ((bearing: number, variation: number) => void) | null;
+  onBearingUpdate: ((b: Bearing, variation: number) => void) | null;
 }
 
 export interface PlotterState {
@@ -58,9 +59,15 @@ export interface STDResult {
   distNM: number;
 }
 
+export interface FixMarker {
+  svgX: number;
+  svgY: number;
+}
+
 export interface ToolState {
   activeTool: ToolName;
   lines: DrawnLine[];
+  fixes: FixMarker[];
   dividers: DividersState | null;
   parallelRules: ParallelRulesState | null;
   plotter: PlotterState | null;
@@ -72,17 +79,17 @@ export interface ToolState {
 }
 
 export interface WorkbookCallbacks {
-  setBearing:  ((bearing: number, variation: number) => void) | null;
+  setBearing:  ((b: Bearing, variation: number) => void) | null;
   setDistance: ((nm: number) => void) | null;
   setAccDist:  ((nm: number) => void) | null;
-  setCourse:   ((bearing: number, variation: number) => void) | null;
+  setCourse:   ((b: Bearing, variation: number) => void) | null;
   setETA:      ((eta: string) => void) | null;
   setDRPos:    ((lat: number, lon: number) => void) | null;
 }
 
 export interface BearingResult {
-  trueBear: number;
-  magBearing: number;
+  trueBear: Bearing;
+  magBearing: Bearing;
   error: number;
   landmark: { name: string; lat: number; lon: number };
 }
@@ -90,6 +97,7 @@ export interface BearingResult {
 export const state: ToolState = {
   activeTool: null,
   lines: [],
+  fixes: [],
   dividers: null,
   parallelRules: null,
   plotter: null,

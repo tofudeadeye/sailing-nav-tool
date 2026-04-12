@@ -1,4 +1,4 @@
-import { trueBearing } from '../coords.ts';
+import { trueBearing, bearing } from '../coords.ts';
 import type { BearingResult } from './types.ts';
 
 function gaussianRandom(): number {
@@ -13,9 +13,8 @@ export function takeBearing(
   variation: number,
   variationDir: 'E' | 'W' = 'W',
 ): BearingResult {
-  const trueBear = trueBearing(vesselLat, vesselLon, landmark.lat, landmark.lon);
+  const tb = trueBearing(vesselLat, vesselLon, landmark.lat, landmark.lon);
   const error = gaussianRandom() * 2;
   const signedVar = variationDir === 'W' ? variation : -variation;
-  const magBearing = Math.round((((trueBear + signedVar + error) % 360) + 360) % 360 * 10) / 10;
-  return { trueBear, magBearing, error, landmark };
+  return { trueBear: bearing(tb), magBearing: bearing(tb + signedVar + error), error, landmark };
 }

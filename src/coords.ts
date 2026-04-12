@@ -10,6 +10,36 @@
 export const SVG_W = 2400;
 export const SVG_H = 1800;
 
+/**
+ * A compass bearing (0–360°). toString() produces a display-ready string like
+ * "306.8" (one decimal, zero-padded to 5 chars) so template literals like
+ * `${b}°T` render correctly without .toFixed() at every call site.
+ * valueOf() returns the numeric value so arithmetic works transparently.
+ */
+export class Bearing {
+  readonly value: number;
+  constructor(deg: number) {
+    this.value = ((deg % 360) + 360) % 360;
+  }
+  toString(): string {
+    return this.value.toFixed(1).padStart(5, '0');
+  }
+  valueOf(): number {
+    return this.value;
+  }
+  asTrue(): string {
+    return `${this.toString()}°T`;
+  }
+  asMag(): string {
+    return `${this.toString()}°M`;
+  }
+}
+
+/** Convenience factory — wraps a raw degree value in a Bearing. */
+export function bearing(deg: number): Bearing {
+  return new Bearing(deg);
+}
+
 export interface ChartBounds {
   readonly minLat: number;
   readonly maxLat: number;

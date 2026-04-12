@@ -1,17 +1,16 @@
-import { transform, svgToScreen, screenToSVG, SVG_W, SVG_H } from '../coords.ts';
+import { transform, svgToScreen, screenToSVG, SVG_W, SVG_H, bearing as mkBearing, type Bearing } from '../coords.ts';
 import { state } from './types.ts';
 
-function bearingLabel(bearing: number, variation: number, variationDir: 'E' | 'W'): string {
-  const t = Math.round(((bearing % 360) + 360) % 360);
+function bearingLabel(b: Bearing, variation: number, variationDir: 'E' | 'W'): string {
   const signedVar = variationDir === 'W' ? variation : -variation;
-  const m = Math.round((((bearing + signedVar) % 360) + 360) % 360);
-  return `${String(t).padStart(3, '0')}°T (${String(m).padStart(3, '0')}°M)`;
+  const m = mkBearing(b.value + signedVar);
+  return `${b.toTrue()} (${m.toMag()})`;
 }
 
 export function spawnParallelRules(
   svgX: number,
   svgY: number,
-  onBearingUpdate: (bearing: number, variation: number) => void,
+  onBearingUpdate: (b: Bearing, variation: number) => void,
 ): void {
   const gap = SVG_H * 0.06;
   state.parallelRules = {
@@ -79,13 +78,13 @@ export function drawParallelRules(c: CanvasRenderingContext2D): void {
       Math.hypot(r1c.x - rs.x, r1c.y - rs.y) < threshold ||
       Math.hypot(r2c.x - rs.x, r2c.y - rs.y) < threshold;
     if (nearRose) {
-      const bearing = (pr.angleDeg + 90 + 360) % 360;
-      pr.onBearingUpdate?.(bearing, variationDir === 'W' ? variation : -variation);
+      const b = mkBearing((pr.angleDeg + 90 + 360) % 360);
+      pr.onBearingUpdate?.(b, variationDir === 'W' ? variation : -variation);
     }
   }
 
-  const bearing = (pr.angleDeg + 90 + 360) % 360;
-  const label = bearingLabel(bearing, variation, variationDir);
+  const b = mkBearing((pr.angleDeg + 90 + 360) % 360);
+  const label = bearingLabel(b, variation, variationDir);
   const c1 = svgToScreen(pr.rule1.svgX, pr.rule1.svgY);
   c.save();
   c.fillStyle = 'rgba(0,0,0,0.75)';

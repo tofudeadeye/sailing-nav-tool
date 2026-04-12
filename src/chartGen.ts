@@ -899,8 +899,10 @@ function renderChart(svgEl: SVGSVGElement, data: ChartData, compassSvgs: { outer
     // Label: centroid of the polygon
     const cx = islandPoly.reduce((s, p) => s + p.x, 0) / islandPoly.length;
     const cy = islandPoly.reduce((s, p) => s + p.y, 0) / islandPoly.length;
+    // If a lighthouse sits at this island's centroid, offset the label below it
+    const hasLighthouse = landmarks.some(l => l.type === 'lighthouse' && Math.hypot(l.x - cx, l.y - cy) < 20);
     el('text', {
-      x: cx, y: cy,
+      x: cx, y: hasLighthouse ? cy + 33 : cy,
       'text-anchor': 'middle', 'dominant-baseline': 'middle',
       'font-family': 'Georgia, serif', 'font-size': 11,
       'font-style': 'italic', fill: '#5a3e1b', opacity: 0.85,

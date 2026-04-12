@@ -4,14 +4,14 @@
 
 import {
   transform, svgToScreen, screenToSVG, svgToLatLon,
-  latLonToSVG, formatLatLon, SVG_W, SVG_H,
+  formatLatLon, SVG_W, SVG_H, bearing,
 } from './coords.ts';
 import { generateChart, renderChartToSVG, FormatVariation } from './chartGen.ts';
 import type { ChartData, Landmark } from './chartGen.ts';
 import {
   state, wb,
   initCanvas, resizeCanvas, redrawCanvas,
-  setEraseMode, clearAllLines,
+  clearAllLines,
   spawnDividers, handleDividersPointerDown, handleDividersPointerMove, handleDividersPointerUp,
   spawnPlotter, handlePlotterPointerDown, handlePlotterPointerMove, handlePlotterPointerUp,
   spawnParallelRules, drawParallelRules, handleRulesPointerDown, handleRulesPointerMove, handleRulesPointerUp,
@@ -62,10 +62,6 @@ const wbSubmit    = getEl<HTMLButtonElement>('wb-submit');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmt3(n: number): string {
-  return String(Math.round(((n % 360) + 360) % 360)).padStart(3, '0');
-}
-
 function svgLineBearing(x1: number, y1: number, x2: number, y2: number): number {
   return ((Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI + 90 + 360) % 360;
 }
@@ -83,10 +79,10 @@ function distToSegment(
 
 // ── Workbook callbacks ────────────────────────────────────────────────────────
 
-wb.setBearing  = (b, v) => { wbBearing.textContent  = `${fmt3(b)}°T (${fmt3(b + v)}°M)`; };
+wb.setBearing  = (b, v) => { wbBearing.textContent  = `${b.asTrue()} (${bearing(b.value + v).asMag()})`; };
 wb.setDistance = (nm)   => { wbDistance.textContent = `${nm.toFixed(2)} NM`; };
 wb.setAccDist  = (nm)   => { wbAccDist.textContent  = `${nm.toFixed(2)} NM`; };
-wb.setCourse   = (b, v) => { wbCourse.textContent   = `${fmt3(b)}°T (${fmt3(b + v)}°M)`; };
+wb.setCourse   = (b, v) => { wbCourse.textContent   = `${b.asTrue()} (${bearing(b.value + v).asMag()})`; };
 wb.setETA      = (eta)  => { wbETA.textContent      = eta; };
 wb.setDRPos    = (lat, lon) => { wbDRPos.textContent = formatLatLon(lat, lon); };
 
@@ -224,7 +220,7 @@ let panOrigin = { x: 0, y: 0 };
 
 chartWrap.addEventListener('pointerdown', (e: PointerEvent) => {
   // Let clicks on floating panels (STD, exercise info, etc.) reach their inputs natively
-  if ((e.target as HTMLElement).closest('#std-panel, #exercise-info')) return;
+  if ((e.target as HTMLElement).closest('#std-panel, #exercise-info, #feedback-overlay')) return;
   e.preventDefault();
   const tool = state.activeTool;
 
@@ -386,7 +382,7 @@ function onPencilDown(e: PointerEvent): boolean {
     const sv = chartData
       ? (chartData.variationDir === 'W' ? chartData.variation : -chartData.variation)
       : 0;
-    wb.setCourse?.(svgLineBearing(line.svgX1, line.svgY1, line.svgX2, line.svgY2), sv);
+    wb.setCourse?.(bearing(svgLineBearing(line.svgX1, line.svgY1, line.svgX2, line.svgY2)), sv);
     pencilStart = null;
     pencilPreviewEnd = null;
   }
@@ -477,7 +473,7 @@ function onCompassClick(e: PointerEvent): void {
 
   const signedVar = chartData.variationDir === 'W' ? chartData.variation : -chartData.variation;
   wb.setBearing?.(result.trueBear, signedVar);
-  showToast(`${nearest.name}: ${fmt3(result.magBearing)}°M (${fmt3(result.trueBear)}°T)`);
+  showToast(`${nearest.name}: ${result.magBearing.asMag()} (${result.trueBear.asTrue()})`);
 }
 
 function chartCentre(): { lat: number; lon: number } {
@@ -537,7 +533,7 @@ const MARKER_DESC: Record<string, { title: string; body: string }> = {
   },
   rock: {
     title: 'Rock / Obstruction',
-    body: 'A submerged or partially exposed rock hazard. An asterisk symbol (*) indicates a rock that covers and uncovers with the tide. Always consult the tide table before passing close.',
+    body: 'A dangerous submerged rock hazard, shown as an asterisk (✳) — the standard Admiralty symbol for a rock that is always underwater. Always give a wide berth and consult the chart depth figures before passing close.',
   },
   // Buoy types
   port: {
@@ -550,19 +546,19 @@ const MARKER_DESC: Record<string, { title: string; body: string }> = {
   },
   north: {
     title: 'North Cardinal Buoy',
-    body: 'Yellow/black buoy with two upward-pointing topmarks. Pass to the NORTH of this buoy — the deepest water lies to the north. Light: Q or VQ (continuous white).',
+    body: 'Black over yellow buoy with two upward-pointing cone topmarks. Pass to the NORTH of this buoy — safe water lies to the north of the hazard. Light: Q or VQ (quick or very-quick white flashing).',
   },
   south: {
     title: 'South Cardinal Buoy',
-    body: 'Black/yellow buoy with two downward-pointing topmarks. Pass to the SOUTH of this buoy — deepest water lies to the south. Light: Q(6)+LFl or VQ(6)+LFl.',
+    body: 'Yellow over black buoy with two downward-pointing cone topmarks. Pass to the SOUTH of this buoy — safe water lies to the south of the hazard. Light: Q(6)+LFl 15s or VQ(6)+LFl 10s.',
   },
   east: {
     title: 'East Cardinal Buoy',
-    body: 'Black/yellow/black buoy with topmarks pointing apart (egg-timer shape). Pass to the EAST. Light: Q(3) every 10s or VQ(3) every 5s.',
+    body: 'Black/yellow/black buoy with topmarks pointing away from each other (base-to-base). Pass to the EAST. Light: Q(3) every 10s or VQ(3) every 5s.',
   },
   west: {
     title: 'West Cardinal Buoy',
-    body: 'Yellow/black/yellow buoy with topmarks pointing together (hourglass shape). Pass to the WEST. Light: Q(9) every 15s or VQ(9) every 10s.',
+    body: 'Yellow/black/yellow buoy with topmarks pointing toward each other (point-to-point). Pass to the WEST. Light: Q(9) every 15s or VQ(9) every 10s.',
   },
   // Anchorage
   anchorage: {
@@ -630,9 +626,9 @@ const SECTOR_COLOR_LABEL: Record<string, string> = {
   green: '<span style="display:inline-block;width:10px;height:10px;background:#14a03c;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Green',
 };
 const SECTOR_COLOR_MEANING: Record<string, string> = {
-  white: 'safe water',
-  red:   'danger to port',
-  green: 'danger to starboard',
+  white: 'safe water / fairway',
+  red:   'danger in this sector',
+  green: 'danger in this sector',
 };
 
 function lighthouseSectorExtra(lm: Landmark): string {
@@ -640,7 +636,7 @@ function lighthouseSectorExtra(lm: Landmark): string {
   const rows = lm.sectors.map(s => {
     const label = SECTOR_COLOR_LABEL[s.color] ?? s.color;
     const meaning = SECTOR_COLOR_MEANING[s.color] ?? '';
-    return `<tr><td style="padding:1px 6px 1px 0;">${label}</td><td style="padding:1px 0;color:#444;">${fmt3(s.fromDeg)}°–${fmt3(s.toDeg)}°T</td><td style="padding:1px 0 1px 6px;color:#666;font-style:italic;">${meaning}</td></tr>`;
+    return `<tr><td style="padding:1px 6px 1px 0;">${label}</td><td style="padding:1px 0;color:#444;">${bearing(s.fromDeg).toString()}°–${bearing(s.toDeg).asTrue()}</td><td style="padding:1px 0 1px 6px;color:#666;font-style:italic;">${meaning}</td></tr>`;
   }).join('');
   return `<strong style="font-size:11px;">Light sectors:</strong><table style="margin-top:4px;font-size:11px;border-collapse:collapse;">${rows}</table>`;
 }
@@ -682,6 +678,139 @@ function hitTestAllMarkers(sx: number, sy: number): { name: string; descKey: str
   return null;
 }
 
+// ── Context menu ──────────────────────────────────────────────────────────────
+
+let ctxMenu: HTMLDivElement | null = null;
+
+function getCtxMenu(): HTMLDivElement {
+  if (!ctxMenu) {
+    ctxMenu = document.createElement('div');
+    ctxMenu.id = 'ctx-menu';
+    Object.assign(ctxMenu.style, {
+      position: 'fixed',
+      zIndex: '2000',
+      background: 'rgba(245,240,225,0.98)',
+      border: '1px solid #8a7a55',
+      borderRadius: '4px',
+      boxShadow: '2px 3px 8px rgba(0,0,0,0.28)',
+      fontFamily: 'Georgia, serif',
+      fontSize: '13px',
+      minWidth: '160px',
+      display: 'none',
+    });
+    document.body.appendChild(ctxMenu);
+  }
+  return ctxMenu;
+}
+
+function showCtxMenu(items: { label: string; action: () => void }[], clientX: number, clientY: number): void {
+  const menu = getCtxMenu();
+  menu.innerHTML = '';
+  for (const item of items) {
+    const btn = document.createElement('button');
+    btn.textContent = item.label;
+    Object.assign(btn.style, {
+      display: 'block',
+      width: '100%',
+      padding: '7px 14px',
+      background: 'none',
+      border: 'none',
+      textAlign: 'left',
+      cursor: 'pointer',
+      color: '#1a1a1a',
+      fontFamily: 'inherit',
+      fontSize: 'inherit',
+    });
+    btn.addEventListener('mouseenter', () => { btn.style.background = '#e8dfc0'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+    btn.addEventListener('click', () => {
+      hideCtxMenu();
+      item.action();
+    });
+    menu.appendChild(btn);
+  }
+  menu.style.display = 'block';
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const menuW = 180, menuH = items.length * 34;
+  menu.style.left = `${Math.min(clientX, vw - menuW - 4)}px`;
+  menu.style.top  = `${Math.min(clientY, vh - menuH - 4)}px`;
+}
+
+function hideCtxMenu(): void {
+  if (ctxMenu) ctxMenu.style.display = 'none';
+}
+
+function hitTestLine(sx: number, sy: number): number {
+  const svgPos = screenToSVG(sx, sy);
+  const threshold = 15 / transform.scale;
+  let bestIdx = -1, bestDist = threshold;
+  for (let i = 0; i < state.lines.length; i++) {
+    const l = state.lines[i]!;
+    const d = distToSegment(svgPos.x, svgPos.y, l.svgX1, l.svgY1, l.svgX2, l.svgY2);
+    if (d < bestDist) { bestDist = d; bestIdx = i; }
+  }
+  return bestIdx;
+}
+
+function hitTestFix(sx: number, sy: number): number {
+  const threshold = 12; // screen pixels
+  for (let i = 0; i < state.fixes.length; i++) {
+    const f = state.fixes[i]!;
+    const sc = svgToScreen(f.svgX, f.svgY);
+    if (Math.hypot(sc.x - sx, sc.y - sy) < threshold) return i;
+  }
+  return -1;
+}
+
+chartWrap.addEventListener('contextmenu', (e: MouseEvent) => {
+  e.preventDefault();
+  const rect = chartWrap.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+
+  const lineIdx = hitTestLine(sx, sy);
+  const fixIdx  = hitTestFix(sx, sy);
+
+  const items: { label: string; action: () => void }[] = [];
+
+  if (fixIdx >= 0) {
+    items.push({ label: 'Delete Fix', action: () => { state.fixes.splice(fixIdx, 1); redraw(); } });
+  } else if (lineIdx >= 0) {
+    const svgPos = screenToSVG(sx, sy);
+    const fixLimitReached = currentEx?.id === 1 && state.fixes.length >= 1;
+    if (!fixLimitReached) {
+      items.push({
+        label: 'Add Fix',
+        action: () => {
+          state.fixes.push({ svgX: svgPos.x, svgY: svgPos.y });
+          redraw();
+        },
+      });
+    }
+    items.push({ label: 'Delete Line', action: () => { state.lines.splice(lineIdx, 1); redraw(); } });
+  } else {
+    const svgPos = screenToSVG(sx, sy);
+    const fixLimitReached = currentEx?.id === 1 && state.fixes.length >= 1;
+    if (!fixLimitReached) {
+      items.push({
+        label: 'Add Fix',
+        action: () => {
+          state.fixes.push({ svgX: svgPos.x, svgY: svgPos.y });
+          redraw();
+        },
+      });
+    }
+  }
+
+  showCtxMenu(items, e.clientX, e.clientY);
+});
+
+document.addEventListener('pointerdown', (e: PointerEvent) => {
+  if (ctxMenu && ctxMenu.style.display !== 'none' && !ctxMenu.contains(e.target as Node)) {
+    hideCtxMenu();
+  }
+});
+
 // ── Tool buttons ──────────────────────────────────────────────────────────────
 
 function setActiveTool(tool: ToolName): void {
@@ -706,12 +835,6 @@ document.querySelectorAll<HTMLButtonElement>('.tool-btn[data-tool]').forEach(btn
     const t = btn.dataset['tool'] as ToolName;
     setActiveTool(state.activeTool === t ? null : t);
   });
-});
-
-getEl<HTMLButtonElement>('btn-erase').addEventListener('click', () => {
-  setActiveTool('pencil');
-  setEraseMode(true);
-  getEl<HTMLButtonElement>('btn-erase').classList.add('active');
 });
 
 getEl<HTMLButtonElement>('btn-clear-all').addEventListener('click', () => {
@@ -853,7 +976,7 @@ wbSubmit.addEventListener('click', () => {
     speed:    parseFloat(wbSpeed.value) || 0,
   };
 
-  lastScore = scoreExercise(currentEx, chartData, state.lines, wbValues);
+  lastScore = scoreExercise(currentEx, chartData, state.lines, wbValues, state.fixes);
   showFeedbackOnCanvas = true;
 
   feedbackTitle.textContent = `${currentEx.title} — ${lastScore.pass ? '✓ Pass' : '✗ Retry'}`;
